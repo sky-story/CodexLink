@@ -5,9 +5,13 @@ class SessionController {
   }
   submit(command) {
     if (!command || typeof command.commandId !== 'string' || !/^[\w-]{8,128}$/.test(command.commandId) || typeof command.threadId !== 'string' || !command.threadId) return Promise.reject(new Error('commandId and threadId are required'));
-    if (!['steer', 'queue', 'interrupt', 'approval', 'input'].includes(command.action)) return Promise.reject(new Error('Unsupported action'));
+    if (!['steer', 'queue', 'interrupt', 'approval', 'input', 'settings'].includes(command.action)) return Promise.reject(new Error('Unsupported action'));
     if (['steer', 'queue'].includes(command.action) && (!Array.isArray(command.input) || !command.input.length)) return Promise.reject(new Error('Nonempty input required'));
     if (['steer', 'interrupt'].includes(command.action) && !command.expectedTurnId) return Promise.reject(new Error('expectedTurnId is required'));
+    if (command.action === 'settings' && (Object.keys(command).some(k => !['commandId', 'threadId', 'action', 'model', 'effort'].includes(k))
+      || typeof command.model !== 'string' || !command.model.trim() || typeof command.effort !== 'string' || !command.effort.trim())) {
+      return Promise.reject(new Error('Model and reasoning effort are required; permission overrides are not allowed'));
+    }
     const previous = this.chains.get(command.threadId) || Promise.resolve();
     const task = previous.catch(() => {}).then(() => this.execute(command));
     this.chains.set(command.threadId, task);
@@ -31,6 +35,23 @@ class SessionController {
         if (result.turnId !== expectedTurnId) throw new Error('Upstream returned a different turn');
       } else if (action === 'queue') {
         result = await this.rpc('thread/queue/add', { threadId, input, clientUserMessageId: commandId });
+      } else if (action === 'settings') {
+        let cursor = null, model;
+        do {
+          const page = await this.rpc('model/list', { cursor, limit: 100, includeHidden: false });
+          model = page.data.find(m => m.model === command.model);
+          cursor = page.nextCursor;
+        } while (!model && cursor);
+        if (!model || !model.supportedReasoningEfforts?.some(e => e.reasoningEffort === command.effort)) {
+          throw Object.assign(new Error('The Mac model catalog does not support this model/effort combination'), { code: -32602 });
+        }
+        await this.rpc('thread/settings/update', { threadId, model: command.model, effort: command.effort });
+        // The mutation may have succeeded even if the readback fails. Do not replay it.
+        try {
+          const { thread } = await this.rpc('thread/read', { threadId, includeTurns: false });
+          if (thread.id !== threadId || thread.model !== command.model || thread.reasoningEffort !== command.effort) throw new Error('Settings changed before confirmation');
+          result = { model: thread.model, effort: thread.reasoningEffort };
+        } catch { throw new Error('Settings sent but confirmation is unavailable; refresh the Mac settings before retrying'); }
       } else if (action === 'interrupt') {
         result = await this.rpc('turn/interrupt', { threadId, turnId: expectedTurnId });
       } else {
@@ -47,7 +68,7 @@ class SessionController {
       // An item notification can arrive before the RPC response. Never downgrade observed input.
       const current = this.store.get(commandId);
       const observed = current?.status === 'observed';
-      return this.receipt(commandId, { status: observed ? 'observed' : action === 'queue' ? 'queued' : ['approval', 'input'].includes(action) ? 'sent' : 'accepted', result, turnId: (observed && current.turnId) || result?.turnId || expectedTurnId || null });
+      return this.receipt(commandId, { status: observed ? 'observed' : action === 'settings' ? 'applied' : action === 'queue' ? 'queued' : ['approval', 'input'].includes(action) ? 'sent' : 'accepted', result, turnId: (observed && current.turnId) || result?.turnId || expectedTurnId || null });
     } catch (error) {
       // The official event is stronger evidence than a missing RPC response.
       // Preserve both its status and Turn ID; a duplicate still returns this receipt.

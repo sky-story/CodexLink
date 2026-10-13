@@ -112,6 +112,8 @@ private func configureDocumentationPreview(_ service: CodexService, scene: Strin
     service.isConnected = true
     service.isInitialized = true
     service.supportsSharedSessionControl = true
+    service.supportsSharedSessionSettings = true
+    service.availableModels = [CodexModelOption(id: "demo-model", model: "demo-model", displayName: "示例模型", description: "Offline fixture", isDefault: true, supportedReasoningEfforts: [CodexReasoningEffortOption(reasoningEffort: "medium", description: "Demo")], defaultReasoningEffort: "medium")]
     service.supportsMacTerminalOpen = true
     service.syncRealtimeEnabled = false
     service.threads = [
@@ -124,6 +126,7 @@ private func configureDocumentationPreview(_ service: CodexService, scene: Strin
     ]
     let threadJSON: JSONValue = .object([
         "id": .string(threadID), "name": .string("示例：待办 App"), "cwd": .string("/demo/todo-app"),
+        "model": .string("demo-model"), "reasoningEffort": .string("medium"),
         "status": .object(["type": .string(isRunning ? "active" : "idle")]),
         "turns": .array([.object(["id": .string(turnID), "status": .string(isRunning ? "inProgress" : "completed"), "items": .array(items)])])
     ])

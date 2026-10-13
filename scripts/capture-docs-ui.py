@@ -28,6 +28,10 @@ def run(*args, **kwargs):
     return subprocess.run(['xcrun', 'simctl', *args], check=True, **kwargs)
 
 run('install', simulator, str(app))
+# Documentation needs neither camera nor microphone. Deny them only in this
+# dedicated simulator so first-launch prompts cannot obscure the screenshots.
+for service in ['camera', 'microphone']:
+    run('privacy', simulator, 'revoke', service, bundle)
 run('ui', simulator, 'appearance', 'light')
 run('status_bar', simulator, 'override', '--time', '9:41', '--dataNetwork', 'wifi', '--wifiMode', 'active', '--wifiBars', '3', '--batteryState', 'charged', '--batteryLevel', '100')
 font = ImageFont.truetype('/System/Library/Fonts/STHeiti Medium.ttc', 32)

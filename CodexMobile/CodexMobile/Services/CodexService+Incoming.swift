@@ -160,6 +160,20 @@ extension CodexService {
             Task { await refreshSharedQueue(threadID: threadID) }; return
         }
         let paramsObject = params?.objectValue
+        if method == "thread/settings/updated",
+           let threadID = paramsObject?["threadId"]?.stringValue,
+           let settings = paramsObject?["threadSettings"]?.objectValue {
+            applySharedSettings(threadID: threadID, object: settings)
+            return
+        }
+        if method == "thread/started", let thread = paramsObject?["thread"]?.objectValue,
+           let threadID = thread["id"]?.stringValue {
+            applySharedSettings(threadID: threadID, object: thread)
+        }
+        if supportsSharedSessionControl, ["turn/started", "turn/completed"].contains(method),
+           let threadID = paramsObject?["threadId"]?.stringValue, threadID == activeThreadId {
+            Task { await refreshSharedSettings(threadID: threadID) }
+        }
 
         switch method {
         case "turn/plan/updated", "item/plan/delta", "item/completed", "serverRequest/resolved":

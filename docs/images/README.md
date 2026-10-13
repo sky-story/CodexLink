@@ -2,7 +2,7 @@
 
 这些图片是实际 SwiftUI 视图在独立 iOS Simulator 中的截图，使用源码内的虚构演示数据。所有图均在原始截图外附有“演示数据 · 离线预览”标记；不是用户真实会话，不是端到端验收截图。
 
-- `session-queue.png`：示例任务运行时的会话、Mac 队列与 Queue/Steer/Stop 入口。
+- `session-queue.png`：示例任务运行时的会话、模型/思考强度、Mac 队列与 Queue/Steer/Stop 入口。
 - `session-approval.png`：虚构的 `swift test` 审批请求；没有实际执行该命令。
 - `session-completed.png`：示例完成回复和继续输入入口。
 
@@ -33,3 +33,5 @@ xcrun simctl io SIMULATOR_ID screenshot docs/images/session-queue.png
 另两个场景为 `approval`、`completed`；切换场景前只终止专用模拟器里的演示 App，再按相同方式启动。截图前等待界面完成渲染。可用 `simctl status_bar` 固定时间、电量，用 `simctl ui` 固定浅色外观。
 
 生成后必须人工检查：内容来自虚构样例、演示标识清晰、无系统弹窗/真实对话/个人路径、文字可读。不要在图片上伪造连接结果或把演示截图写成真实功能验收。
+
+脚本仅对该专用模拟器拒绝相机与麦克风权限，避免首次权限弹窗遮挡。若之前运行测试留下了系统弹窗，先关闭再启动这个专用模拟器，然后重新截图；不要重置真实手机或已配对模拟器。

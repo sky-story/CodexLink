@@ -318,3 +318,94 @@ final class CodexServiceCatchupRecoveryTests: XCTestCase {
         return service
     }
 }
+
+// Run only on the unpaired documentation simulator; defaults are unique per fixture.
+@MainActor
+final class SharedSessionSettingsTests: XCTestCase {
+    private static var retainedServices: [CodexService] = []
+    private func fixture() -> CodexService {
+        let suite = "CodexLink.settings.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        let service = CodexService(defaults: defaults)
+        Self.retainedServices.append(service)
+        service.supportsSharedSessionControl = true
+        service.supportsSharedSessionSettings = true
+        service.isConnected = true
+        return service
+    }
+
+    func testMetadataReadUsesMacValuesWithoutLoadingHistory() async {
+        let service = fixture()
+        service.requestTransportOverride = { method, params in
+            XCTAssertEqual(method, "thread/read")
+            XCTAssertEqual(params?.objectValue?["includeTurns"], .bool(false))
+            return RPCMessage(id: .integer(1), result: .object(["thread": .object([
+                "id": .string("fixture"), "model": .string("mac-model"), "reasoningEffort": .string("high")
+            ])]))
+        }
+        await service.refreshSharedSettings(threadID: "fixture")
+        XCTAssertEqual(service.sharedSessionSettings["fixture"]?.model, "mac-model")
+        XCTAssertEqual(service.sharedSessionSettings["fixture"]?.effort, "high")
+    }
+
+    func testNewSettingsEventWinsOverInFlightMetadataAndOtherThreadsStaySeparate() async {
+        let service = fixture()
+        service.requestTransportOverride = { _, _ in
+            service.handleNotification(method: "thread/settings/updated", params: .object([
+                "threadId": .string("fixture"), "threadSettings": .object(["model": .string("new-model"), "effort": .string("low")])
+            ]))
+            return RPCMessage(id: .integer(1), result: .object(["thread": .object([
+                "id": .string("fixture"), "model": .string("stale-model"), "reasoningEffort": .string("high")
+            ])]))
+        }
+        await service.refreshSharedSettings(threadID: "fixture")
+        service.handleNotification(method: "thread/settings/updated", params: .object([
+            "threadId": .string("other"), "threadSettings": .object(["model": .string("other-model"), "effort": .string("medium")])
+        ]))
+        XCTAssertEqual(service.sharedSessionSettings["fixture"]?.model, "new-model")
+        XCTAssertEqual(service.sharedSessionSettings["fixture"]?.effort, "low")
+        XCTAssertEqual(service.sharedSessionSettings["other"]?.model, "other-model")
+    }
+
+    func testReplayedSettingsReceiptDoesNotReplaceCurrentMacConfiguration() {
+        let service = fixture()
+        service.applySharedSettings(threadID: "fixture", object: ["model": .string("current-model"), "effort": .string("high")])
+        service.applySharedReceipt(.object([
+            "threadId": .string("fixture"), "commandId": .string("old-command"), "action": .string("settings"), "status": .string("applied"),
+            "result": .object(["model": .string("old-model"), "effort": .string("low")])
+        ]))
+        XCTAssertEqual(service.sharedSessionSettings["fixture"]?.model, "current-model")
+        XCTAssertEqual(service.sharedSessionSettings["fixture"]?.effort, "high")
+    }
+
+    func testSettingsPayloadIsNarrowAndUnknownIsNotClaimedApplied() async {
+        let service = fixture()
+        var calls = 0
+        service.requestTransportOverride = { method, params in
+            calls += 1
+            XCTAssertEqual(method, "remote/control")
+            let object = params!.objectValue!
+            XCTAssertEqual(Set(object.keys), Set(["commandId", "threadId", "action", "model", "effort"]))
+            XCTAssertEqual(object["model"], .string("fixture-model"))
+            XCTAssertEqual(object["effort"], .string("low"))
+            return RPCMessage(id: .integer(1), result: .object([
+                "threadId": .string("fixture"), "commandId": object["commandId"]!, "action": .string("settings"), "status": .string("unknown"), "detail": .string("Unconfirmed settings")
+            ]))
+        }
+        do {
+            try await service.sharedControl(threadID: "fixture", action: "settings", model: "fixture-model", effort: "low")
+            XCTFail("Unknown settings must report uncertainty")
+        } catch { XCTAssertTrue(error.localizedDescription.contains("Unconfirmed")) }
+        XCTAssertEqual(calls, 1)
+        XCTAssertNil(service.sharedSessionSettings["fixture"])
+    }
+
+    func testEffortSelectionUsesOnlyTheSelectedModelsSupportedOptions() {
+        let option = CodexModelOption(id: "fixture", model: "fixture", displayName: "Fixture", description: "", isDefault: false,
+            supportedReasoningEfforts: [.init(reasoningEffort: "low", description: ""), .init(reasoningEffort: "high", description: "")], defaultReasoningEffort: "low")
+        XCTAssertEqual(SharedSessionSettings(object: ["effort": .string("high")]).suggestedEffort(for: option), "high")
+        XCTAssertEqual(SharedSessionSettings(object: ["effort": .string("ultra")]).suggestedEffort(for: option), "low")
+        XCTAssertNil(SharedSessionSettings(object: ["model": .string("fixture"), "reasoningEffort": .null]).effort)
+    }
+}

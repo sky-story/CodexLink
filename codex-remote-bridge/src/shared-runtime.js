@@ -132,7 +132,7 @@ function createSharedRuntime({ endpoint = defaultEndpoint(), env = process.env, 
     if (!method) {
       throw new Error('Approval and user-input replies require remote/control and a durable commandId');
     }
-    if (method === 'initialize') return { sharedSession: true, controlProtocol: 1, macTerminalOpen: process.platform === 'darwin' && endpoint.startsWith('unix:///') };
+    if (method === 'initialize') return { sharedSession: true, controlProtocol: 1, sessionSettings: true, macTerminalOpen: process.platform === 'darwin' && endpoint.startsWith('unix:///') };
     if (method === 'initialized') return;
     if (method === 'remote/openOnMac') return macTerminal.open(params);
     if (method === 'remote/control') return controller.submit(params);

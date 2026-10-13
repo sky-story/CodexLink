@@ -25,6 +25,7 @@ Left to right: **running session and queue → approval request → completed re
 | Live Mac CLI output | Verified on a physical iPhone, including cellular access through Tailscale |
 | Steer during execution | Verified on the original Turn, without starting another task |
 | Persistent Queue | Idle and busy Queue verified on iPhone; the Mac daemon owns the queue |
+| Session model and reasoning effort | Display and change the Mac configuration; isolated live-daemon check passed, physical picker interaction pending |
 | Remote approvals | One-time approval verified; denial, races, and reconnect with pending approval need further validation |
 | Stop | Original Turn interruption verified; **already-backgrounded tool processes may keep running** |
 | Continue on Mac | The original Mac TUI remains usable after phone controls |
@@ -48,6 +49,8 @@ Mac Bridge ── Optional event / session label → Bark → iPhone lock screen
 ```
 
 A **Turn** is one task execution, ending in completion, failure, or interruption. Queue normally creates a later Turn; Steer adds input to the current Turn.
+
+The composer shows the session's model and reasoning effort, with choices supplied by your Mac's model catalog. Changes apply to subsequent tasks and waiting Queue entries; they do not change the running Turn. Settings are confirmed by the same daemon, with existing approval and sandbox policies preserved. Reconnecting refreshes the configuration; uncertain changes are not automatically resent. Update both the iPhone app and the Bridge to use the selectors.
 
 The CLI and Bridge must connect to the **same shared daemon**. Loading history or starting a separate App Server does not share a running task. Sessions started with `--no-daemon` are unsupported; some CLI `-c` overrides may also select an embedded runtime.
 

@@ -100,3 +100,50 @@ test('structured input is sent once and only resolved notification confirms comp
   controller.observe({ method: 'serverRequest/resolved', params: { requestId: 'question' } });
   assert.equal(store.get(request.commandId).status, 'observed'); store.close();
 });
+
+test('model settings use catalog validation, a narrow next-turn update, readback and durable deduplication', async () => {
+  const store = new ControlStore(':memory:'); const calls = [];
+  const controller = new SessionController({ store, rpc: async (method, params) => {
+    calls.push({ method, params });
+    if (method === 'model/list') return params.cursor ? { data: [{ model: 'fixture-model', supportedReasoningEfforts: [{ reasoningEffort: 'high' }] }], nextCursor: null } : { data: [], nextCursor: 'page2' };
+    if (method === 'thread/settings/update') return {};
+    if (method === 'thread/read') return { thread: { id: 'thread', model: 'fixture-model', reasoningEffort: 'high' } };
+    assert.fail(method);
+  }});
+  const command = { commandId: 'settings-once', threadId: 'thread', action: 'settings', model: 'fixture-model', effort: 'high' };
+  try {
+    const [a,b] = await Promise.all([controller.submit(command), controller.submit(command)]);
+    assert.equal(a.status, 'applied'); assert.deepEqual(a, b);
+    assert.deepEqual(a.result, { model: 'fixture-model', effort: 'high' });
+    assert.deepEqual(calls.find(c => c.method === 'thread/settings/update').params, { threadId: 'thread', model: 'fixture-model', effort: 'high' });
+    assert.equal(calls.filter(c => c.method === 'thread/settings/update').length, 1);
+    assert.deepEqual(await new SessionController({ store, rpc: async () => assert.fail('must not resend') }).submit(command), a);
+  } finally { store.close(); }
+});
+
+test('settings reject permission injection and unsupported model/effort before mutation', async () => {
+  const store = new ControlStore(':memory:'); const calls = [];
+  const controller = new SessionController({ store, rpc: async method => { calls.push(method); return { data: [{ model: 'fixture', supportedReasoningEfforts: [{ reasoningEffort: 'low' }] }], nextCursor: null }; }});
+  const command = { commandId: 'settings-denied', threadId: 'thread', action: 'settings', model: 'fixture', effort: 'high' };
+  try {
+    await assert.rejects(controller.submit({ ...command, sandboxPolicy: { type: 'dangerFullAccess' } }), /permission/);
+    await assert.rejects(controller.submit({ ...command, effort: null }), /required/);
+    assert.equal(calls.length, 0);
+    assert.equal((await controller.submit(command)).status, 'failed');
+    assert.deepEqual(calls, ['model/list']);
+  } finally { store.close(); }
+});
+
+test('unconfirmed settings stay unknown and cannot be automatically applied again', async () => {
+  for (const readback of [async () => { throw Object.assign(new Error('read failed'), { code: -32601 }); }, async () => ({ thread: { id: 'thread', model: 'different', reasoningEffort: 'low' } })]) {
+    const store = new ControlStore(':memory:'); let updates = 0;
+    const controller = new SessionController({ store, rpc: async method => {
+      if (method === 'model/list') return { data: [{ model: 'fixture', supportedReasoningEfforts: [{ reasoningEffort: 'low' }] }] };
+      if (method === 'thread/settings/update') { updates++; return {}; }
+      return readback();
+    }});
+    const command = { commandId: 'settings-unknown', threadId: 'thread', action: 'settings', model: 'fixture', effort: 'low' };
+    try { assert.equal((await controller.submit(command)).status, 'unknown'); assert.equal((await controller.submit(command)).status, 'unknown'); assert.equal(updates, 1); }
+    finally { store.close(); }
+  }
+});

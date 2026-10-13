@@ -317,6 +317,10 @@ final class CodexService {
     var isConnected = false
     var isConnecting = false
     var supportsMacTerminalOpen = false
+    var supportsSharedSessionSettings = false
+    var sharedSessionSettings: [String: SharedSessionSettings] = [:]
+    var sharedSettingsRevision: [String: Int] = [:]
+    var sharedSettingsError: [String: String] = [:]
     var supportsSharedSessionControl = false
     var sharedControlStatus: [String: String] = [:]
     var sharedQueueText: [String: [String]] = [:]

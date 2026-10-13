@@ -295,6 +295,7 @@ extension CodexService {
 
         do {
             let handshake = try await sendRequest(method: "initialize", params: modernParams)
+            supportsSharedSessionSettings = handshake.result?.objectValue?["sessionSettings"]?.boolValue == true
             supportsMacTerminalOpen = handshake.result?.objectValue?["macTerminalOpen"]?.boolValue == true
             supportsSharedSessionControl = handshake.result?.objectValue?["sharedSession"]?.boolValue == true
             // A successful modern initialize means the runtime accepted the experimental
