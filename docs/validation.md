@@ -56,3 +56,13 @@ For live acceptance, create a disposable project and start the original TUI agai
 ## Source-publication checks
 
 The bilingual README links and embedded image paths were checked against the exact Git index. Known local credentials and maintainer identifiers were absent from the public files. Signing defaults in the public project are neutral; the maintainer’s working signing files and pairing identity were preserved. The simulator build passed after updating this fork’s privacy and feedback URLs. These checks are not a clean-machine installation test or a comprehensive security audit.
+
+## Phone-created chat history compatibility
+
+A real isolated new-chat probe reproduced `-32601: list_turns is not supported yet`: Codex 0.162.1 selected `historyMode: paginated` by default, while the local store rejected the required history operation. Both `thread/read(includeTurns:true)` and `thread/resume` failed for that thread; the older live-resume fallback could not repair it.
+
+The Bridge now explicitly requests the supported `legacy` history format when creating a new thread. It retains the subscription established by `thread/start`, and discovery continues past unreadable threads so one unsupported session cannot block other live subscriptions. Existing threads are not migrated, replaced, or deleted, and sandbox/approval settings remain unchanged.
+
+21 focused shared-runtime, history-fallback, and controller tests passed. Both new regressions failed before their fixes. A real same-daemon probe with an in-memory control store created a new thread in an isolated workspace, queued one no-tool task, observed exactly one completed Turn with the matching input ID and response, and successfully read/resumed that same thread. Before the first message, legacy history returned the expected not-materialized response already handled by the iPhone app. This validates the Bridge path; phone UI retesting remains pending. Previously created paginated chats are preserved and may still report the original error.
+
+Creating a phone chat does not automatically open iTerm. Use the conversation menu's open-on-Mac action; a brand-new empty chat should receive its first message before terminal resume. Full physical iTerm attachment remains experimental.

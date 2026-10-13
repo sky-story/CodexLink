@@ -79,3 +79,59 @@ test('daemon connection loss reattaches and deduplicates an uncertain command wi
     assert.match(received.find(e => e.id === 99).error.message, /durable commandId/);
   } finally { runtime.shutdown(); for (const ws of peers) ws.terminate(); await new Promise(r => wss.close(r)); store.close(); }
 });
+
+test('phone-created threads use supported legacy history and keep their existing start subscription', async () => {
+  const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' }); await once(wss, 'listening');
+  const calls = []; let peer, created = false;
+  wss.on('connection', ws => {
+    peer = ws;
+    ws.on('message', raw => {
+      const msg = JSON.parse(raw); calls.push(msg); if (msg.id == null) return;
+      let result = {};
+      if (msg.method === 'thread/loaded/list') result = { data: created ? ['fresh'] : [], nextCursor: null };
+      if (msg.method === 'thread/start') { created = true; result = { thread: { id: 'fresh', turns: [], historyMode: msg.params.historyMode || 'paginated' } }; }
+      if (msg.method === 'thread/resume') { ws.send(JSON.stringify({ id: msg.id, error: { code: -32600, message: 'no rollout found for thread id fresh' } })); return; }
+      ws.send(JSON.stringify({ id: msg.id, result }));
+    });
+  });
+  const store = new ControlStore(':memory:'); const received = [];
+  const runtime = createSharedRuntime({ endpoint: `ws://127.0.0.1:${wss.address().port}`, store, discoveryInterval: 20 });
+  runtime.onMessage(raw => received.push(JSON.parse(raw)));
+  const until = async fn => { for (let i = 0; i < 200; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 5)); } throw new Error('Timeout'); };
+  try {
+    await until(() => received.some(e => e.method === 'remote/status'));
+    runtime.send(JSON.stringify({ id: 'new-chat', method: 'thread/start', params: { cwd: '/fixture', model: 'fixture-model', historyMode: 'paginated', sandbox: 'danger-full-access', approvalPolicy: 'never' } }));
+    await until(() => received.some(e => e.id === 'new-chat'));
+    assert.equal(received.find(e => e.id === 'new-chat').result.thread.historyMode, 'legacy');
+    assert.deepEqual(calls.find(c => c.method === 'thread/start').params, { cwd: '/fixture', model: 'fixture-model', historyMode: 'legacy', sandbox: 'workspace-write', approvalPolicy: 'on-request', approvalsReviewer: 'user' });
+    await until(() => calls.filter(c => c.method === 'thread/loaded/list').length >= 3);
+    assert.equal(calls.filter(c => c.method === 'thread/start').length, 1);
+    assert.equal(calls.filter(c => c.method === 'thread/resume').length, 0);
+  } finally { runtime.shutdown(); peer?.terminate(); await new Promise(r => wss.close(r)); store.close(); }
+});
+
+test('one unsupported thread does not prevent discovery of other live sessions', async () => {
+  const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' }); await once(wss, 'listening');
+  let peer; const received = [], calls = [];
+  wss.on('connection', ws => {
+    peer = ws;
+    ws.on('message', raw => {
+      const msg = JSON.parse(raw); calls.push(msg); if (msg.id == null) return;
+      if (msg.method === 'thread/resume' && msg.params.threadId === 'unsupported') {
+        ws.send(JSON.stringify({ id: msg.id, error: { code: -32601, message: 'list_turns is not supported yet' } })); return;
+      }
+      const result = msg.method === 'thread/loaded/list' ? { data: ['unsupported', 'live'], nextCursor: null }
+        : msg.method === 'thread/resume' ? { thread: { id: 'live', turns: [] } } : {};
+      ws.send(JSON.stringify({ id: msg.id, result }));
+    });
+  });
+  const store = new ControlStore(':memory:');
+  const runtime = createSharedRuntime({ endpoint: `ws://127.0.0.1:${wss.address().port}`, store });
+  runtime.onMessage(raw => received.push(JSON.parse(raw)));
+  try {
+    for (let i = 0; i < 100 && !received.some(e => e.method === 'thread/started'); i++) await new Promise(r => setTimeout(r, 5));
+    assert(received.some(e => e.method === 'thread/started' && e.params.thread.id === 'live'));
+    assert(received.some(e => e.method === 'remote/status' && e.params.detail === 'list_turns is not supported yet'));
+    assert(!calls.some(c => c.method === 'thread/start' || c.method === 'turn/start'));
+  } finally { runtime.shutdown(); peer?.terminate(); await new Promise(r => wss.close(r)); store.close(); }
+});

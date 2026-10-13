@@ -73,7 +73,15 @@ function createSharedRuntime({ endpoint = defaultEndpoint(), env = process.env, 
       let cursor = null;
       do {
         const result = await rpc('thread/loaded/list', { limit: 100, cursor });
-        for (const id of result.data) if (!attached.has(id)) await attach(id);
+        for (const id of result.data) {
+          if (attached.has(id)) continue;
+          try { await attach(id); }
+          catch (error) {
+            // An unreadable/empty thread must not starve other live subscriptions.
+            if (!ready) throw error;
+            emit({ method: 'remote/status', params: { connected: true, detail: error.message } });
+          }
+        }
         cursor = result.nextCursor;
       } while (cursor && ready);
     } catch (error) { emit({ method: 'remote/status', params: { connected: ready, detail: error.message } }); }
@@ -142,7 +150,15 @@ function createSharedRuntime({ endpoint = defaultEndpoint(), env = process.env, 
       // Resume by ID rejoins a live runtime. Never replace its permissions/model with phone defaults.
       const result = await rpc(method, { threadId: params.threadId }); attached.add(params.threadId); return result;
     }
-    if (method === 'thread/start') return rpc(method, { cwd: params.cwd, approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: 'workspace-write', ...(params.model ? { model: params.model } : {}) });
+    if (method === 'thread/start') {
+      // 0.162.1 defaults to paginated history, whose local store rejects list_turns.
+      // Select the supported persisted format at creation, never migrate an existing thread.
+      const result = await rpc(method, { cwd: params.cwd, approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: 'workspace-write', historyMode: 'legacy', ...(params.model ? { model: params.model } : {}) });
+      // thread/start already subscribes this connection. Resuming before its first
+      // user message has no rollout to read and can block discovery of other threads.
+      attached.add(result.thread.id);
+      return result;
+    }
     if (['turn/start', 'turn/steer', 'turn/interrupt'].includes(method)) throw Object.assign(new Error('Use remote/control with a stable commandId and an explicit Queue, Steer or Interrupt action'), { code: -32602 });
     if (!READ_METHODS.has(method)) throw Object.assign(new Error(`Method is outside the shared-session MVP: ${method}`), { code: -32601 });
     return rpc(method, params);

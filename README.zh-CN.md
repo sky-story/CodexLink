@@ -188,7 +188,7 @@ Mac 关机、睡眠或断网时无法实时控制。launchd 后台运行并不�
 - **能看历史但不能 Steer**：确认目标是同一 daemon 的活动会话，并且有运行中的 Turn。Steer 失败不会退化成新任务。
 - **Stop 后仍有命令运行**：Stop 中断 Turn；Codex 已后台化的工具进程可能继续，需要在 Mac 检查。手机尚无独立后台终端管理入口。
 - **回执 unknown / Delivery uncertain**：先检查会话历史。Bridge 为避免重复执行，不会自动补发结果不明的指令。
-- **历史加载出现 `list_turns is not supported yet`**：已有针对已加载线程的窄范围恢复；原真机报错消失与否仍待确认，不保证覆盖所有历史情况。
+- **历史加载出现 `list_turns is not supported yet`**：新建会话已改用当前 daemon 支持的历史格式；之前创建的分页会话保留原样，仍可能报错。修复后真机界面待复测。
 - **在 Mac 打开失败**：要求 iTerm、本机已加载线程和 macOS 自动化权限。该功能仍属实验性，不会重启 Codex.app。
 - **Bark 没提醒**：检查 Bark 通知权限、专注模式和 Mac 联网，再运行显式测试；勿把 Key 发到公开 Issue。
 

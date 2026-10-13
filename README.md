@@ -186,7 +186,7 @@ Your Mac must be awake and online for remote control. A launchd service does not
 - **History works, Steer does not:** the target must be active on the same daemon with a running Turn. Failed Steer is not converted into a new task.
 - **A command remains after Stop:** already-backgrounded tools may continue. Inspect them on Mac; separate phone-side background terminal management is not available yet.
 - **Delivery uncertain:** inspect the conversation before retrying. Uncertain commands are not automatically resubmitted.
-- **`list_turns is not supported yet`:** a narrow fallback exists for loaded threads. The original physical-device error has not yet been confirmed resolved.
+- **`list_turns is not supported yet`:** new chats now explicitly use the supported history format. Previously created paginated chats may still be affected; they are preserved. Phone UI retesting is pending.
 - **Open on Mac fails:** iTerm and macOS Automation permission are required. This flow is experimental.
 - **No Bark alert:** check notification permissions, Focus, and Mac connectivity; run the explicit test. Never post your key in an issue.
 
