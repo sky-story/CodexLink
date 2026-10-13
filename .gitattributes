@@ -1,0 +1,4 @@
+# Keep generated bundles and upstream license text byte-for-byte reproducible.
+CodexMobile/CodexMobile/Resources/Mermaid/mermaid.min.js -whitespace linguist-generated=true
+CodexMobile/CodexMobile/Resources/ThirdPartyNotices.txt -whitespace linguist-generated=true
+ThirdPartyLicenses/** -whitespace

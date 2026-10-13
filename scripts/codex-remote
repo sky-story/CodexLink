@@ -1,0 +1,5 @@
+#!/bin/zsh
+# Optional explicit attachment launcher; normal Codex 0.162.1 already uses this daemon.
+set -euo pipefail
+codex app-server daemon start
+exec codex --remote unix:// "$@"

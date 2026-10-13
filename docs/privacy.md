@@ -1,0 +1,12 @@
+# CodexLink privacy notes
+
+CodexLink is a self-hosted developer preview. This document describes this fork's intended shared-daemon workflow, not the upstream project's hosted services.
+
+- **Execution and accounts:** Codex runs on your Mac using your own account. CodexLink does not export Codex login credentials to the phone. Codex itself communicates with its configured services under their own policies.
+- **Phone connection:** The phone pairs with your Mac. App messages are end-to-end encrypted after pairing. The Relay can observe connection metadata; Tailscale provides the private network.
+- **Local storage:** Pairing identities, trusted-device state, receipts, session caches, and operational logs are stored locally on the relevant devices. Keep your Mac account and phone protected. Removing the service does not erase pairing or conversation history.
+- **Optional Bark:** Bark receives your device key and notification content. Session labels are opt-in and include the session name or project basename and a short hash identifier. Message previews, code, commands, full paths, and raw thread IDs are not included in these Bark notifications. Bark delivery is separate from the app's encrypted message transport and subject to Bark/Apple policies.
+- **Optional APNs:** This app's own APNs delivery remains unverified. If you configure it, review the provider's payload and credentials before use; Apple receives notification metadata/content.
+- **Diagnostics:** This fork does not automatically upload diagnostics. Public GitHub issues are public: remove conversations, keys, pairing codes, usernames, paths, and device identifiers before posting. Never send login credentials to maintainers.
+
+Use [GitHub Issues](https://github.com/sky-story/CodexLink/issues) for non-sensitive questions. No hosted service, analytics dashboard, or notification-delivery guarantee is provided by this repository.

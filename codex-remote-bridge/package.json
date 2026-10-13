@@ -1,0 +1,36 @@
+{
+  "name": "codex-remote",
+  "version": "1.3.8",
+  "description": "Local bridge between Codex and the Codex Remote mobile app. Run `codex-remote up` to start.",
+  "main": "src/index.js",
+  "bin": {
+    "codex-remote": "./bin/codex-remote.js"
+  },
+  "files": [
+    "bin/",
+    "src/"
+  ],
+  "scripts": {
+    "start": "node ./bin/codex-remote.js up",
+    "test": "node --require ./test/helpers/isolated-state.cjs --test ./test/*.test.js",
+    "prepack": "node ./scripts/prepare-private-defaults.js",
+    "postpack": "node ./scripts/cleanup-private-defaults.js"
+  },
+  "keywords": [
+    "codex-remote",
+    "codex",
+    "bridge",
+    "cli"
+  ],
+  "author": "Emanuele Di Pietro",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "qrcode-terminal": "^0.12.0",
+    "ws": "^8.22.0"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=22.13"
+  }
+}
