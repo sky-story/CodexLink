@@ -42,7 +42,7 @@ Bark labels use the formal thread name, then project basename, then an unnamed-s
 ## Known gaps
 
 - This app's own APNs delivery is not validated. The local Personal Team build lacks the required push entitlement. Bark is a separate receiving app.
-- Opening a thread in iTerm is experimental. A local attempt timed out at a macOS Automation consent prompt; successful attachment from the phone is not yet verified.
+- Opening a thread in iTerm is experimental. Local isolated opening/attachment has passed; phone-to-launchd opening and macOS Automation permission handling still need physical acceptance.
 - A targeted fallback handles `list_turns is not supported yet` for already-loaded threads. Resolution of the original phone UI error remains unconfirmed.
 - No complete validation of repeated network loss, app force-quit, sleep/wake, daemon failure, concurrent input, or approval races.
 - No clean-machine first-install acceptance yet.
@@ -65,10 +65,12 @@ The Bridge now explicitly requests the supported `legacy` history format when cr
 
 21 focused shared-runtime, history-fallback, and controller tests passed. Both new regressions failed before their fixes. A real same-daemon probe with an in-memory control store created a new thread in an isolated workspace, queued one no-tool task, observed exactly one completed Turn with the matching input ID and response, and successfully read/resumed that same thread. Before the first message, legacy history returned the expected not-materialized response already handled by the iPhone app. This validates the Bridge path; phone UI retesting remains pending. Previously created paginated chats are preserved and may still report the original error.
 
-Creating a phone chat does not automatically open iTerm. Use the conversation menu's open-on-Mac action; a brand-new empty chat should receive its first message before terminal resume. Full physical iTerm attachment remains experimental.
+New Chat now asks whether to open the same session in iTerm. Declining sends no open request. A confirmed empty chat opens a waiting window until its first phone message materializes the rollout, then runs the existing same-daemon resume command. Waiting is bounded to 30 minutes and can be canceled with Ctrl+C. Nine focused Bridge tests passed, covering the original open behavior, durable deduplication, and waiting for a nonempty rollout with safely quoted arguments. Physical phone prompt and full iTerm attachment acceptance remain pending.
 
 ## Shared model and reasoning settings
 
 The composer now reads the daemon's session metadata and model catalog, displays the configured model/effort, and submits constrained, durable settings commands through the existing Bridge. Only model and effort are changed. Official settings events update the display; reconnect refreshes metadata without loading history. A replayed receipt cannot replace newer Mac settings. Changes target subsequent tasks, including waiting Queue entries, not an already-running Turn.
 
 20 focused Bridge tests and 5 isolated simulator tests passed. Coverage includes supported combinations, catalog pagination at the Bridge, permission-field rejection, duplicate requests, uncertain readback, and a newer settings event winning over a stale metadata response. A real isolated same-daemon thread changed model/effort, received the official settings event, returned the same receipt for a duplicate command, and completed exactly one queued no-tool task. Its execution context matched the requested model/effort; approval and sandbox settings were unchanged. This is daemon-level acceptance, not physical iPhone picker acceptance. Concurrent Mac/phone setting changes and changes while a real task is running still need end-to-end checks.
+
+One isolated iOS test passed for preserving the request ID after an uncertain open and accurately reporting a waiting window. The new-chat confirmation was visually reviewed in the unpaired simulator. A local live experiment opened a real iTerm window for an empty legacy thread, queued one no-tool message, and observed the assistant reply in that exact terminal session after automatic attachment. The thread had exactly one Turn and unchanged approval/sandbox settings. This local launch does not establish phone-to-launchd Automation authorization or physical prompt acceptance.

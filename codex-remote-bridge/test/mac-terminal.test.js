@@ -79,3 +79,41 @@ test('missing app/binary and denied Automation report definite failure without r
   const g = fixture(t, { launch: async () => { throw Object.assign(new Error('Automation denied'), { definiteFailure: true }); } });
   assert.equal((await g.opener.open({ threadId, requestId })).status, 'failed');
 });
+
+test('new empty thread opens a waiting window once without creating a model task', async t => {
+  const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codexlink-empty-window-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const rollout = path.join(dir, 'not-yet-written.jsonl');
+  const f = fixture(t, { rpc: async method => method === 'thread/loaded/list' ? { data: [threadId] } : { thread: { id: threadId, cwd: dir, path: rollout } } });
+  const result = await f.opener.open({ threadId, requestId });
+  assert.equal(result.status, 'opened');
+  assert.equal(result.waitingForFirstMessage, true);
+  assert.match(f.launches[0], /1800/);
+  assert.match(f.launches[0], /resume/);
+  assert.deepEqual(await createMacTerminal(f.options).open({ threadId, requestId }), result);
+  assert.equal(f.launches.length, 1);
+});
+
+test('waiting shell launches only after a nonempty rollout, with exact quoted thread and socket', async t => {
+  const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+  const { spawn } = require('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codexlink-wait-'"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const rollout = path.join(dir, "rollout $(touch BAD).jsonl");
+  const output = path.join(dir, 'arguments.json');
+  const binary = path.join(dir, 'recorder');
+  fs.writeFileSync(binary, '#!/usr/bin/env node\nrequire("fs").writeFileSync(' + JSON.stringify(output) + ', JSON.stringify(process.argv.slice(2)));\n', { mode: 0o700 });
+  const child = spawn('/bin/zsh', ['-f', '-c', terminalCommand({ binary, endpoint, threadId, cwd: dir, waitForRollout: rollout })], { stdio: 'pipe' });
+  t.after(() => { if (child.exitCode === null) child.kill('SIGTERM'); });
+  const done = new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', code => code === 0 ? resolve() : reject(new Error('exit ' + code))); });
+  await new Promise(resolve => child.stdout.once('data', resolve));
+  assert.equal(fs.existsSync(output), false);
+  fs.writeFileSync(rollout, '');
+  await new Promise(resolve => setTimeout(resolve, 1100));
+  assert.equal(fs.existsSync(output), false);
+  fs.writeFileSync(rollout, '{"type":"session_meta"}\n');
+  await done;
+  assert.deepEqual(JSON.parse(fs.readFileSync(output)), ['--remote', endpoint, 'resume', threadId]);
+  assert.equal(fs.existsSync(path.join(dir, 'BAD')), false);
+});

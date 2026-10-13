@@ -97,9 +97,9 @@ APNs payload 会经过 Apple，不属于 Bridge 与手机的端到端加密消�
 
 ## 在 Mac 打开当前会话（iTerm）
 
-手机进入会话后，点右上角会话操作菜单 → **在 Mac 打开此会话（iTerm）**。默认新建一个 iTerm 窗口；手机仍可继续操作。新建手机会话不会自动弹出 Mac 窗口。此入口要求本机共享 daemon 中已加载该线程、Mac 安装 iTerm、后台服务可找到 Codex CLI。
+手机进入会话后，点右上角会话操作菜单 → **在 Mac 打开此会话（iTerm）**。默认新建一个 iTerm 窗口；手机仍可继续操作。新建手机会话后会弹出确认提示，选择“打开 iTerm”才会新建 Mac 窗口；选择“暂不”不发送开窗请求。此入口要求本机共享 daemon 中已加载该线程、Mac 安装 iTerm、后台服务可找到 Codex CLI。
 
-实现使用明确的 `codex --remote unix:///…/app-server-control.sock resume <threadId>`，不启动 daemon，不发送新任务，不 fork，不走旧的 Codex.app 强制关闭接续。窗口已打开回执仅确认 iTerm 创建窗口，不能单独证明 CLI 已完成连接。
+实现使用明确的 `codex --remote unix:///…/app-server-control.sock resume <threadId>`，不启动 daemon，不发送新任务，不 fork，不走旧的 Codex.app 强制关闭接续。空白 legacy 会话在首条消息前无法 resume，因此窗口先等待 daemon 提供的准确 rollout 路径变为非空，再连接相同线程。手机需发送首条消息；不会为开窗自动发送任务。等待最多 30 分钟，Ctrl+C 可取消。窗口已打开回执仅确认 iTerm 创建窗口，不能单独证明 CLI 已完成连接。
 
 macOS 首次可能显示“想要控制 iTerm”的自动化授权。需要在 Mac 上允许；前台终端与 launchd 后台服务的授权来源可能不同，必须分别按实际系统提示处理。遇到结果不确定时先检查 Mac 窗口与授权提示；App 保留请求编号，不自动重复开窗。确认未打开后可选择“已检查 Mac，重新打开”，这是一次明确的新请求，可能产生额外窗口。每次明确成功后的再次点击也会新建窗口。
 

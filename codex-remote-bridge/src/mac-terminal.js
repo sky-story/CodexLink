@@ -17,10 +17,17 @@ function safePath(value) {
   if (typeof value !== 'string' || !path.isAbsolute(value) || /[\x00-\x1f\x7f]/.test(value)) throw new Error('Mac 路径无效，未打开窗口。');
   return value;
 }
-function terminalCommand({ binary, endpoint, threadId, cwd }) {
+function terminalCommand({ binary, endpoint, threadId, cwd, waitForRollout }) {
   if (!UUID.test(threadId) || !endpoint.startsWith('unix:///')) throw new Error('只能打开本机共享 daemon 的有效会话。');
   safePath(endpoint.slice(7)); safePath(binary); safePath(cwd);
-  const command = `cd -- ${quote(cwd)} && exec ${quote(binary)} --remote ${quote(endpoint)} resume ${quote(threadId)}`;
+  let wait = '';
+  if (waitForRollout) {
+    safePath(waitForRollout);
+    // Empty legacy threads cannot be resumed until their first user message.
+    // Open the window now, but never create a replacement thread or model task.
+    wait = `print -r -- 'CodexLink：请在手机发送此会话的第一条消息；就绪后此窗口会自动连接。等待最多 30 分钟，Ctrl+C 可取消。'; for codexlinkWait in {1..1800}; do [[ -s ${quote(waitForRollout)} ]] && break; /bin/sleep 1; done; [[ -s ${quote(waitForRollout)} ]] || { print -r -- '等待超时，请在手机会话菜单重新选择在 Mac 打开。'; exit 1; }; `;
+  }
+  const command = `cd -- ${quote(cwd)} && { ${wait}exec ${quote(binary)} --remote ${quote(endpoint)} resume ${quote(threadId)}; }`;
   // No login/interactive shell startup files, aliases or command substitution.
   return `/bin/zsh -f -c ${quote(command)}`;
 }
@@ -77,10 +84,11 @@ function createMacTerminal({ rpc, store, endpoint, env = process.env, platform =
         if (!loaded) throw new Error('此会话当前未在 Mac daemon 中加载。请先打开会话后再试。');
         const { thread } = await rpc('thread/read', { threadId, includeTurns: false });
         if (thread.id !== threadId) throw new Error('会话身份不匹配，未打开窗口。');
-        const command = terminalCommand({ binary, endpoint, threadId, cwd: thread.cwd });
+        const waitForRollout = thread.path && !fs.existsSync(thread.path) ? thread.path : undefined;
+        const command = terminalCommand({ binary, endpoint, threadId, cwd: thread.cwd, waitForRollout });
         dispatched = true;
         const sessionId = await launch(command);
-        return save(requestId, threadId, { status: 'opened', terminal: 'iTerm', sessionId, threadId });
+        return save(requestId, threadId, { status: 'opened', terminal: 'iTerm', sessionId, threadId, waitingForFirstMessage: Boolean(waitForRollout) });
       } catch (error) {
         return save(requestId, threadId, { status: dispatched && !error.definiteFailure ? 'unknown' : 'failed', detail: error.message });
       }

@@ -29,6 +29,7 @@ struct TurnView: View {
     @State private var isShowingMacHandoffConfirm = false
     @State private var macTerminalMessage: String?
     @State private var macTerminalCanRetry = false
+    @State private var isShowingNewChatMacPrompt = false
     @State private var isShowingWorktreeHandoff = false
     @State private var isShowingForkWorktree = false
     @State private var macHandoffErrorMessage: String?
@@ -383,6 +384,24 @@ struct TurnView: View {
                 )
             }
         }
+        .task(id: "\(thread.id)-\(codex.newChatMacPromptThreadIDs.contains(thread.id))") {
+            if codex.newChatMacPromptThreadIDs.contains(thread.id) {
+                // Let the project picker sheet and navigation transition finish first.
+                do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
+                isShowingNewChatMacPrompt = true
+            }
+        }
+        .alert("要在 Mac 新建 iTerm 窗口吗？", isPresented: $isShowingNewChatMacPrompt) {
+            Button("打开 iTerm") {
+                codex.newChatMacPromptThreadIDs.remove(thread.id)
+                openInMacTerminal()
+            }
+            Button("暂不", role: .cancel) {
+                codex.newChatMacPromptThreadIDs.remove(thread.id)
+            }
+        } message: {
+            Text("打开刚创建的同一个会话。空白会话会先显示等待提示，发送首条手机消息后自动连接；也可以稍后从会话菜单打开。")
+        }
         .alert("在 Mac 打开此会话", isPresented: Binding(
             get: { macTerminalMessage != nil },
             set: { if !$0 { macTerminalMessage = nil } }
@@ -597,8 +616,10 @@ struct TurnView: View {
         Task { @MainActor in
             defer { isHandingOffToMac = false }
             do {
-                try await DesktopHandoffService(codex: codex).openInMacTerminal(threadId: thread.id)
-                macTerminalMessage = "已在 Mac 的 iTerm 打开窗口，正在连接此会话。你可以继续在手机上操作。"
+                let waiting = try await DesktopHandoffService(codex: codex).openInMacTerminal(threadId: thread.id)
+                macTerminalMessage = waiting
+                    ? "已在 Mac 的 iTerm 打开等待窗口。请在手机发送第一条消息，窗口会自动连接此会话；等待最多 30 分钟。"
+                    : "已在 Mac 的 iTerm 打开窗口，正在连接此会话。你可以继续在手机上操作。"
             } catch DesktopHandoffError.terminalOutcomeUnknown(let message) {
                 macTerminalCanRetry = true
                 macTerminalMessage = message + "\n如确认没有打开窗口，处理 Mac 上的授权提示后可以重新打开；这可能产生额外窗口。"
@@ -633,7 +654,8 @@ struct TurnView: View {
             defer { isStartingSiblingChat = false }
 
             do {
-                _ = try await codex.startThreadIfReady(preferredProjectPath: resolvedProjectPathForFollowUpThread())
+                let newThread = try await codex.startThreadIfReady(preferredProjectPath: resolvedProjectPathForFollowUpThread())
+                if codex.supportsMacTerminalOpen { codex.newChatMacPromptThreadIDs.insert(newThread.id) }
             } catch {
                 if codex.lastErrorMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
                     codex.lastErrorMessage = error.localizedDescription

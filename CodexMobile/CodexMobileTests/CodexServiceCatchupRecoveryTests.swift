@@ -409,3 +409,38 @@ final class SharedSessionSettingsTests: XCTestCase {
         XCTAssertNil(SharedSessionSettings(object: ["model": .string("fixture"), "reasoningEffort": .null]).effort)
     }
 }
+
+@MainActor
+final class NewChatTerminalTests: XCTestCase {
+    private static var retainedServices: [CodexService] = []
+
+    func testUncertainOpenKeepsRequestIDAndWaitingWindowIsReportedAccurately() async throws {
+        let suite = "CodexLink.terminal.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        let service = CodexService(defaults: defaults)
+        Self.retainedServices.append(service)
+        var ids: [String] = []
+        service.requestTransportOverride = { method, params in
+            XCTAssertEqual(method, "remote/openOnMac")
+            XCTAssertEqual(Set(params!.objectValue!.keys), Set(["threadId", "requestId"]))
+            XCTAssertEqual(params?.objectValue?["threadId"], .string("fixture-thread"))
+            ids.append(params!.objectValue!["requestId"]!.stringValue!)
+            return RPCMessage(id: .integer(1), result: .object([
+                "status": .string(ids.count == 1 ? "unknown" : "opened"),
+                "waitingForFirstMessage": .bool(true)
+            ]))
+        }
+        let handoff = DesktopHandoffService(codex: service)
+        do {
+            _ = try await handoff.openInMacTerminal(threadId: "fixture-thread")
+            XCTFail("Unknown must not claim a window opened")
+        } catch DesktopHandoffError.terminalOutcomeUnknown { }
+        XCTAssertEqual(ids.count, 1)
+        let waiting = try await handoff.openInMacTerminal(threadId: "fixture-thread")
+        XCTAssertTrue(waiting)
+        XCTAssertEqual(ids.count, 2)
+        XCTAssertEqual(ids[0], ids[1])
+        XCTAssertNil(defaults.string(forKey: "macTerminalOpen.pending.fixture-thread"))
+    }
+}

@@ -317,6 +317,7 @@ final class CodexService {
     var isConnected = false
     var isConnecting = false
     var supportsMacTerminalOpen = false
+    var newChatMacPromptThreadIDs: Set<String> = []
     var supportsSharedSessionSettings = false
     var sharedSessionSettings: [String: SharedSessionSettings] = [:]
     var sharedSettingsRevision: [String: Int] = [:]

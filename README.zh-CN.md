@@ -136,6 +136,8 @@ node scripts/private-service.cjs pair
 
 成功配对后，选择 Mac 的测试会话，发送一条简单 Queue 验证。随后可在 Mac 执行稍长的安全任务，体验 Steer 和 Stop。
 
+点击 **New Chat** 新建会话后，会询问是否在 Mac 新建 **iTerm** 窗口。“暂不”只保留手机会话；“打开 iTerm”打开同一个会话。空白会话会先显示等待提示，手机发送第一条消息后终端自动连接，最多等待 30 分钟，Ctrl+C 可取消。之后也可从会话菜单打开；Mac 可能需要允许自动化控制。
+
 后台服务同时管理 Bridge 和 Relay，只监听 Tailscale 私网地址的 9100 端口。终端可关闭。不要再单独启动第二个 Bridge/Relay 抢占端口，也不需要公网端口映射。初次配对后，普通断网和 Bridge 重启不应要求反复扫码。
 
 ### 5. 可选：用 Bark 接收锁屏提醒

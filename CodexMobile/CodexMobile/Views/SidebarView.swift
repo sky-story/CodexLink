@@ -274,6 +274,7 @@ struct SidebarView: View {
                     preferredProjectPath: preferredProjectPath,
                     codex: codex
                 )
+                if codex.supportsMacTerminalOpen { codex.newChatMacPromptThreadIDs.insert(thread.id) }
                 onOpenThread(thread)
             } catch {
                 let message = error.localizedDescription
@@ -294,6 +295,7 @@ struct SidebarView: View {
                     preferredProjectPath: preferredProjectPath,
                     codex: codex
                 )
+                if codex.supportsMacTerminalOpen { codex.newChatMacPromptThreadIDs.insert(thread.id) }
                 onOpenThread(thread)
             } catch {
                 let message = error.localizedDescription

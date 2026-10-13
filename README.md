@@ -134,6 +134,8 @@ node scripts/private-service.cjs pair
 
 Select a safe test conversation and send a simple Queue message. Then try Steer during a longer harmless Mac task.
 
+After **New Chat**, choose whether to open the same session in a new **iTerm** window on your Mac. Choose “暂不” to stay on the phone. An empty session opens a waiting window: send its first message from the phone, then the terminal attaches automatically. It waits up to 30 minutes; Ctrl+C cancels waiting. You can also open a session later from its conversation menu. macOS Automation permission may be required.
+
 The service runs Bridge and Relay together, listening on the Mac's Tailscale address at port 9100. You can close the terminal. Do not start another Bridge/Relay on that port. No public port forwarding is needed. Ordinary network loss or Bridge restarts should not require repeated pairing.
 
 ### 5. Optional: Bark lock-screen notifications

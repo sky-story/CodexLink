@@ -102,7 +102,7 @@ struct CodexMobileApp: App {
 @MainActor
 private func configureDocumentationPreview(_ service: CodexService, scene: String) {
     let threadID = "docs-demo", turnID = "docs-turn"
-    let isRunning = scene != "completed"
+    let isRunning = scene != "completed" && scene != "new-chat"
     let userText = "请检查示例待办 App 的空列表状态，并给出修改建议。"
     let assistantText = isRunning
         ? "正在检查空列表视图和已有测试。\n\n我会先确认首次打开和清空列表后的行为，再整理修改建议。"
@@ -128,13 +128,17 @@ private func configureDocumentationPreview(_ service: CodexService, scene: Strin
         "id": .string(threadID), "name": .string("示例：待办 App"), "cwd": .string("/demo/todo-app"),
         "model": .string("demo-model"), "reasoningEffort": .string("medium"),
         "status": .object(["type": .string(isRunning ? "active" : "idle")]),
-        "turns": .array([.object(["id": .string(turnID), "status": .string(isRunning ? "inProgress" : "completed"), "items": .array(items)])])
+        "turns": .array(scene == "new-chat" ? [] : [.object(["id": .string(turnID), "status": .string(isRunning ? "inProgress" : "completed"), "items": .array(items)])])
     ])
     service.messagesByThread = [threadID: [
         CodexMessage(id: "docs-user", threadId: threadID, role: .user, text: userText, turnId: turnID),
         CodexMessage(id: "docs-assistant", threadId: threadID, role: .assistant, text: assistantText, turnId: turnID)
     ]]
     service.messageRevisionByThread[threadID] = 1
+    if scene == "new-chat" {
+        service.messagesByThread[threadID] = []
+        service.newChatMacPromptThreadIDs.insert(threadID)
+    }
     if isRunning {
         service.activeTurnIdByThread[threadID] = turnID
         service.runningThreadIDs = [threadID]

@@ -44,14 +44,14 @@ final class DesktopHandoffService {
     }
 
     func clearPendingMacTerminalOpen(threadId: String) {
-        UserDefaults.standard.removeObject(forKey: "macTerminalOpen.pending.\(threadId)")
+        codex.defaults.removeObject(forKey: "macTerminalOpen.pending.\(threadId)")
     }
 
-    func openInMacTerminal(threadId: String) async throws {
+    func openInMacTerminal(threadId: String) async throws -> Bool {
         // Keep the id through response loss/relaunch; retries query the durable result.
         let key = "macTerminalOpen.pending.\(threadId)"
-        let requestId = UserDefaults.standard.string(forKey: key) ?? UUID().uuidString
-        UserDefaults.standard.set(requestId, forKey: key)
+        let requestId = codex.defaults.string(forKey: key) ?? UUID().uuidString
+        codex.defaults.set(requestId, forKey: key)
         let response = try await codex.sendRequest(method: "remote/openOnMac", params: .object([
             "threadId": .string(threadId), "requestId": .string(requestId)
         ]))
@@ -60,7 +60,7 @@ final class DesktopHandoffService {
             throw DesktopHandoffError.invalidResponse
         }
         if status == "opened" || status == "failed" {
-            UserDefaults.standard.removeObject(forKey: key)
+            codex.defaults.removeObject(forKey: key)
         }
         if status == "unknown" {
             throw DesktopHandoffError.terminalOutcomeUnknown(result["detail"]?.stringValue ?? "打开结果不确定，请先检查 Mac。")
@@ -68,6 +68,7 @@ final class DesktopHandoffService {
         guard status == "opened" else {
             throw DesktopHandoffError.bridgeError(code: nil, message: result["detail"]?.stringValue)
         }
+        return result["waitingForFirstMessage"]?.boolValue == true
     }
 
     func continueOnDesktopApp(threadId: String) async throws {
