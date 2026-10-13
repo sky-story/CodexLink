@@ -111,7 +111,7 @@ final class CodexGPTAccountTests: XCTestCase {
         XCTAssertEqual(service.latestBridgePackageVersion, "1.3.8")
         XCTAssertEqual(
             service.bridgeUpdatePrompt?.title,
-            "A newer Codex Remote update is available on your Mac"
+            "A newer CodexLink update is available on your Mac"
         )
         XCTAssertEqual(service.bridgeUpdatePrompt?.command, "npm install -g codex-remote@latest")
         XCTAssertEqual(service.gptAccountSnapshot.status, .unknown)
@@ -208,7 +208,7 @@ final class CodexGPTAccountTests: XCTestCase {
         XCTAssertEqual(service.latestBridgePackageVersion, "1.3.8")
         XCTAssertEqual(
             service.bridgeUpdatePrompt?.title,
-            "A newer Codex Remote update is available on your Mac"
+            "A newer CodexLink update is available on your Mac"
         )
     }
 

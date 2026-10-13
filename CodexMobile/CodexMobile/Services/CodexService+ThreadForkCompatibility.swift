@@ -57,8 +57,8 @@ extension CodexService {
 private extension CodexService {
     var threadForkBridgeUpdatePrompt: CodexBridgeUpdatePrompt {
         CodexBridgeUpdatePrompt(
-            title: "Update Codex Remote on your computer to use /fork",
-            message: "This computer bridge does not support native conversation forks yet. Update the Codex Remote npm package to use /fork and worktree fork flows.",
+            title: "Update CodexLink on your computer to use /fork",
+            message: "This computer bridge does not support native conversation forks yet. Update the CodexLink npm package to use /fork and worktree fork flows.",
             command: "npm install -g codex-remote@latest"
         )
     }

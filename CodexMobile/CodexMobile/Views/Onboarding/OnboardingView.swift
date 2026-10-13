@@ -31,7 +31,7 @@ struct OnboardingView: View {
                         stepNumber: 1,
                         icon: "terminal",
                         title: "Install Codex CLI",
-                        description: "The AI coding agent that lives in your terminal. Codex Remote connects to it from your iPhone.",
+                        description: "The AI coding agent that lives in your terminal. CodexLink connects to it from your iPhone.",
                         command: codexInstallCommand
                     )
                     .tag(2)
@@ -42,7 +42,7 @@ struct OnboardingView: View {
                         title: "Install the Bridge",
                         description: "A lightweight relay that securely connects your Mac to your iPhone.",
                         command: "npm install -g codex-remote@latest",
-                        commandCaption: "Codex Remote can keep your Mac awake with macOS caffeinate while the bridge is running, but it starts disabled by default. You can enable it later in Settings if you want."
+                        commandCaption: "CodexLink can keep your Mac awake with macOS caffeinate while the bridge is running, but it starts disabled by default. You can enable it later in Settings if you want."
                     )
                     .tag(3)
 
@@ -67,7 +67,7 @@ struct OnboardingView: View {
                 advanceToNextPage()
             }
         } message: {
-            Text("Copy and paste \"\(codexInstallCommand)\" on your computer before moving on. Codex Remote will not work until Codex CLI is installed and available in your PATH.")
+            Text("Copy and paste \"\(codexInstallCommand)\" on your computer before moving on. CodexLink will not work until Codex CLI is installed and available in your PATH.")
         }
     }
 

@@ -58,8 +58,8 @@ extension CodexService {
 private extension CodexService {
     var serviceTierBridgeUpdatePrompt: CodexBridgeUpdatePrompt {
         CodexBridgeUpdatePrompt(
-            title: "Update Codex Remote on your computer to use Speed controls",
-            message: "This computer bridge does not support the selected speed setting yet. Update the Codex Remote npm package to use Fast Mode and other speed controls.",
+            title: "Update CodexLink on your computer to use Speed controls",
+            message: "This computer bridge does not support the selected speed setting yet. Update the CodexLink npm package to use Fast Mode and other speed controls.",
             command: "npm install -g codex-remote@latest"
         )
     }

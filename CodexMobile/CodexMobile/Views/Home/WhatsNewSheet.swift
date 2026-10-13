@@ -53,7 +53,7 @@ struct WhatsNewSheet: View {
             Text("What's New")
                 .font(AppFont.title2(weight: .bold))
 
-            Text("Codex Remote \(version)")
+            Text("CodexLink \(version)")
                 .font(AppFont.mono(.subheadline))
                 .foregroundStyle(.secondary)
 

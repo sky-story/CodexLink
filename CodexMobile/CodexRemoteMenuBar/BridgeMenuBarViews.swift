@@ -45,7 +45,7 @@ struct BridgeMenuBarContentView: View {
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center) {
-                Text("Codex Remote Ctrl")
+                Text("CodexLink Ctrl")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
                 Spacer()

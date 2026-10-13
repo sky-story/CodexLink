@@ -123,7 +123,7 @@ node scripts/private-service.cjs start
 node scripts/private-service.cjs status
 ```
 
-首次启动通常会在 Mac 浏览器显示配对二维码。用 **Codex Remote App 内的扫码入口**扫描，不要使用普通相机或在线二维码识别网站。
+首次启动通常会在 Mac 浏览器显示配对二维码。用 **CodexLink App 内的扫码入口**扫描，不要使用普通相机或在线二维码识别网站。
 
 若需要重新显示二维码：
 
@@ -155,7 +155,7 @@ node scripts/private-service.cjs restart
 node scripts/bark-notifications.cjs --send-test
 ```
 
-`accepted` 只说明 Bark 服务接受请求，仍需实际查看锁屏。通知来自 **Bark**，点击后需回到 Codex Remote 处理审批。免费签名下这条路径可用；Codex Remote 自有 APNs 推送尚未完成真机验收。
+`accepted` 只说明 Bark 服务接受请求，仍需实际查看锁屏。通知来自 **Bark**，点击后需回到 CodexLink 处理审批。免费签名下这条路径可用；CodexLink 自有 APNs 推送尚未完成真机验收。
 
 默认只发送固定通用提醒。多个会话同时运行时，可以开启会话标识：
 
@@ -214,4 +214,4 @@ Bridge 单元测试使用临时状态和模拟 Keychain。不要把真实配对�
 
 Codex 登录凭据留在 Mac。配对二维码、设备私钥、Bark Key、APNs 密钥与本地日志不要公开上传。提交 Issue 时请先移除对话、用户名、路径、设备标识及任何凭据。当前没有自动上传诊断信息的功能。
 
-本分支的隐私说明见 [隐私](docs/privacy.md)，支持与问题反馈请使用 [GitHub Issues](https://github.com/sky-story/CodexLink/issues)。源码目录、App 内名称及部分上游帮助页面仍沿用 Codex Remote；共享模式能力以本 README 为准。
+本分支的隐私说明见 [隐私](docs/privacy.md)，支持与问题反馈请使用 [GitHub Issues](https://github.com/sky-story/CodexLink/issues)。App 显示名称为 CodexLink；源码目录和技术标识保留原名以维持兼容，共享模式能力以本 README 为准。

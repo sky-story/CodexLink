@@ -83,10 +83,10 @@ final class CodexServiceTierTests: XCTestCase {
         XCTAssertNil(capturedTurnStartParams[1].objectValue?["serviceTier"]?.stringValue)
         XCTAssertNil(capturedTurnStartParams[2].objectValue?["serviceTier"]?.stringValue)
         XCTAssertFalse(service.supportsServiceTier)
-        XCTAssertEqual(service.bridgeUpdatePrompt?.title, "Update Codex Remote on your Mac to use Speed controls")
+        XCTAssertEqual(service.bridgeUpdatePrompt?.title, "Update CodexLink on your Mac to use Speed controls")
         XCTAssertEqual(
             service.bridgeUpdatePrompt?.message,
-            "This Mac bridge does not support the selected speed setting yet. Update the Codex Remote npm package to use Fast Mode and other speed controls."
+            "This Mac bridge does not support the selected speed setting yet. Update the CodexLink npm package to use Fast Mode and other speed controls."
         )
         XCTAssertEqual(service.bridgeUpdatePrompt?.command, "npm install -g codex-remote@1.1.4")
     }

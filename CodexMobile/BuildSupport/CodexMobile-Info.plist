@@ -9,7 +9,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Codex Remote</string>
+	<string>CodexLink</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -57,15 +57,15 @@
 		<string>_codexremote._tcp</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>Codex Remote needs camera access to let you take photos and attach them to your messages.</string>
+	<string>CodexLink needs camera access to let you take photos and attach them to your messages.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Codex Remote needs local network access to connect to your Codex app-server running on your Mac.</string>
+	<string>CodexLink needs local network access to connect to your Codex app-server running on your Mac.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Codex Remote needs microphone access to record voice notes for ChatGPT transcription.</string>
+	<string>CodexLink needs microphone access to record voice notes for ChatGPT transcription.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Codex Remote needs photo library access to let you save rendered diagrams and attachments.</string>
+	<string>CodexLink needs photo library access to let you save rendered diagrams and attachments.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Codex Remote needs photo library access to let you attach images to your messages.</string>
+	<string>CodexLink needs photo library access to let you attach images to your messages.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>JetBrainsMono-Regular.ttf</string>

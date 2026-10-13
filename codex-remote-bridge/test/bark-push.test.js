@@ -27,7 +27,7 @@ test('payload uses fixed generic text; no thread, command, title or approval con
   assert.equal(options.method, 'POST'); assert(options.signal);
   const payload = JSON.parse(options.body);
   assert.deepEqual(Object.keys(payload).sort(), ['body','device_key','group','isArchive','title']);
-  assert.equal(payload.title, 'Codex Remote'); assert.match(payload.body, /已完成/);
+  assert.equal(payload.title, 'CodexLink'); assert.match(payload.body, /已完成/);
   assert(!options.body.includes('private-thread')); assert(!options.body.includes('PRIVATE CODE'));
   assert(!JSON.stringify(report).includes(config.deviceKey));
 });
@@ -137,5 +137,5 @@ test('labels remain opt-in; disabling skips metadata lookup and sends original g
     readThread: async () => { lookups++; return { name: 'PRIVATE NAME' }; },
     fetchImpl: async (_, options) => { sent.push(JSON.parse(options.body)); return accepted(); } });
   await notifier.handleOutbound(completed);
-  assert.equal(lookups, 0); assert.equal(sent[0].title, 'Codex Remote'); assert.equal(sent[0].group, 'Codex Remote');
+  assert.equal(lookups, 0); assert.equal(sent[0].title, 'CodexLink'); assert.equal(sent[0].group, 'Codex Remote');
 });

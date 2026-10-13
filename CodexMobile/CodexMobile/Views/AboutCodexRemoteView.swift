@@ -1,5 +1,5 @@
 // FILE: AboutCodexRemoteView.swift
-// Purpose: Full-screen guide explaining how Codex Remote works, styled as a blog page.
+// Purpose: Full-screen guide explaining how CodexLink works, styled as a blog page.
 // Layer: View
 // Exports: AboutCodexRemoteView
 
@@ -36,7 +36,7 @@ struct AboutCodexRemoteView: View {
                 .padding(.bottom, 40)
             }
             .font(AppFont.body())
-            .navigationTitle("About Codex Remote")
+            .navigationTitle("About CodexLink")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -50,7 +50,7 @@ struct AboutCodexRemoteView: View {
 
     @ViewBuilder private var header: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Codex Remote")
+            Text("CodexLink")
                 .font(AppFont.headline(weight: .bold))
                 .foregroundStyle(.primary)
 
@@ -97,7 +97,7 @@ struct AboutCodexRemoteView: View {
             sectionTitle("Architecture")
 
             VStack(spacing: 0) {
-                diagramStep(from: "Codex Remote iOS", to: "Bridge (Mac)", via: "WebSocket")
+                diagramStep(from: "CodexLink iOS", to: "Bridge (Mac)", via: "WebSocket")
                 diagramStep(from: "Bridge (Mac)", to: "codex app-server", via: "JSON-RPC")
                 diagramStep(from: "codex app-server", to: "~/.codex/sessions", via: "JSONL rollout", isLast: true)
             }
@@ -283,7 +283,7 @@ struct AboutCodexRemoteView: View {
             calloutCard(
                 icon: "macbook.and.iphone",
                 color: .blue,
-                text: "The desktop app doesn't live-reload external writes. Use the desktop app handoff button in Codex Remote to continue the current thread on your computer."
+                text: "The desktop app doesn't live-reload external writes. Use the desktop app handoff button in CodexLink to continue the current thread on your computer."
             )
         }
     }

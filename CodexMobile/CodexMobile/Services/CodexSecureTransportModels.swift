@@ -1,5 +1,5 @@
 // FILE: CodexSecureTransportModels.swift
-// Purpose: Defines the wire payloads, device trust records, and crypto helpers for Codex Remote E2EE.
+// Purpose: Defines the wire payloads, device trust records, and crypto helpers for CodexLink E2EE.
 // Layer: Service support
 // Exports: Pairing/session models plus transcript, nonce, and key utility helpers
 // Depends on: Foundation, CryptoKit
@@ -201,7 +201,7 @@ enum CodexSecureTransportError: LocalizedError {
              .timedOut(let message):
             return message
         case .decryptFailed:
-            return "Unable to decrypt the secure Codex Remote payload."
+            return "Unable to decrypt the secure CodexLink payload."
         }
     }
 }

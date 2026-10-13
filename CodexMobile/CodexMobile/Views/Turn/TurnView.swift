@@ -1553,7 +1553,7 @@ struct TurnView: View {
                 snapshot: ConnectionRecoverySnapshot(
                     title: "Voice Mode",
                     summary: "Reconnect to your Mac to use voice mode.",
-                    detail: "Keep the Codex Remote bridge running on your paired computer, then try the microphone again.",
+                    detail: "Keep the CodexLink bridge running on your paired computer, then try the microphone again.",
                     status: .interrupted,
                     trailingStyle: .action("Reconnect")
                 ),
@@ -1564,7 +1564,7 @@ struct TurnView: View {
                 snapshot: ConnectionRecoverySnapshot(
                     title: "Voice Mode",
                     summary: "This bridge session does not support voice mode yet.",
-                    detail: "Restart Codex Remote on your computer, then reconnect this iPhone. If it still happens, update Codex Remote on your computer and pair again.",
+                    detail: "Restart CodexLink on your computer, then reconnect this iPhone. If it still happens, update CodexLink on your computer and pair again.",
                     status: .actionRequired,
                     trailingStyle: .action("Reconnect")
                 ),
@@ -1618,8 +1618,8 @@ struct TurnView: View {
             return VoiceRecoveryPresentation(
                 snapshot: ConnectionRecoverySnapshot(
                     title: "Voice Mode",
-                    summary: "Microphone access is off for Codex Remote.",
-                    detail: "Open iPhone Settings, allow Microphone for Codex Remote, then try recording again.",
+                    summary: "Microphone access is off for CodexLink.",
+                    detail: "Open iPhone Settings, allow Microphone for CodexLink, then try recording again.",
                     status: .actionRequired,
                     trailingStyle: .action("Open Settings")
                 ),
@@ -1640,7 +1640,7 @@ struct TurnView: View {
             return VoiceRecoveryPresentation(
                 snapshot: ConnectionRecoverySnapshot(
                     title: "Voice Mode",
-                    summary: "Codex Remote could not start the recorder.",
+                    summary: "CodexLink could not start the recorder.",
                     detail: "Close other audio-heavy apps, then try voice mode again.",
                     status: .actionRequired,
                     trailingStyle: .none

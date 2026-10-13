@@ -364,16 +364,16 @@ extension CodexService {
         } else if let bridgeVersion, !bridgeVersion.isEmpty,
                   let minimumSupportedAppVersion, !minimumSupportedAppVersion.isEmpty {
             promptMessage =
-                "This computer bridge is running Codex Remote \(bridgeVersion), which requires Codex Remote iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
+                "This computer bridge is running CodexLink \(bridgeVersion), which requires CodexLink iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
         } else if let minimumSupportedAppVersion, !minimumSupportedAppVersion.isEmpty {
             promptMessage =
-                "This computer bridge requires Codex Remote iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
+                "This computer bridge requires CodexLink iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
         } else {
-            promptMessage = "This computer bridge requires a newer Codex Remote iPhone app. Update the app, then reconnect."
+            promptMessage = "This computer bridge requires a newer CodexLink iPhone app. Update the app, then reconnect."
         }
 
         bridgeUpdatePrompt = CodexBridgeUpdatePrompt(
-            title: "Update Codex Remote on your iPhone to reconnect",
+            title: "Update CodexLink on your iPhone to reconnect",
             message: promptMessage,
             command: nil
         )
@@ -385,17 +385,17 @@ extension CodexService {
         if let bridgeVersion, !bridgeVersion.isEmpty,
            let minimumSupportedAppVersion, !minimumSupportedAppVersion.isEmpty {
             return .invalidInput(
-                "This computer bridge is running Codex Remote \(bridgeVersion), which requires Codex Remote iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
+                "This computer bridge is running CodexLink \(bridgeVersion), which requires CodexLink iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
             )
         }
 
         if let minimumSupportedAppVersion, !minimumSupportedAppVersion.isEmpty {
             return .invalidInput(
-                "This computer bridge requires Codex Remote iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
+                "This computer bridge requires CodexLink iPhone \(minimumSupportedAppVersion) or newer. Update the iPhone app, then reconnect."
             )
         }
 
-        return .invalidInput("This computer bridge requires a newer Codex Remote iPhone app. Update the app, then reconnect.")
+        return .invalidInput("This computer bridge requires a newer CodexLink iPhone app. Update the app, then reconnect.")
     }
 
     // Classifies socket failures so transient relay hiccups reconnect, while dead pairings are forgotten.
@@ -792,7 +792,7 @@ extension CodexService {
         if nsError.domain == NSURLErrorDomain,
            nsError.code == NSURLErrorNotConnectedToInternet,
            requiresLocalNetworkAuthorization(for: URL(string: attemptedURL) ?? URL(fileURLWithPath: "/")) {
-            return "Codex Remote cannot open the local relay connection on this iPhone. Check Local Network and the app's Wi-Fi/Cellular access in Settings, then retry."
+            return "CodexLink cannot open the local relay connection on this iPhone. Check Local Network and the app's Wi-Fi/Cellular access in Settings, then retry."
         }
 
         return error.localizedDescription
@@ -1012,7 +1012,7 @@ extension CodexService {
             return nil
         }
 
-        return "Trying to reach your saved computer. Codex Remote will keep retrying. If you restarted the bridge on that computer, scan the new QR code."
+        return "Trying to reach your saved computer. CodexLink will keep retrying. If you restarted the bridge on that computer, scan the new QR code."
     }
 
     func retryableSessionUnavailableMessage(forConnectError error: Error) -> String? {
@@ -1020,7 +1020,7 @@ extension CodexService {
             return nil
         }
 
-        return "Trying to reach your saved computer. Codex Remote will keep retrying. If you restarted the bridge on that computer, scan the new QR code."
+        return "Trying to reach your saved computer. CodexLink will keep retrying. If you restarted the bridge on that computer, scan the new QR code."
     }
 
     // Surfaces relay-enforced drops that keep the pairing valid but lost the current send.
@@ -1073,7 +1073,7 @@ extension CodexService {
 
         guard status != .denied else {
             let message =
-                "Codex Remote is not allowed to access your local network. Enable Local Network for Codex Remote in iPhone Settings and try again."
+                "CodexLink is not allowed to access your local network. Enable Local Network for CodexLink in iPhone Settings and try again."
             lastErrorMessage = message
             throw CodexServiceError.invalidInput(message)
         }

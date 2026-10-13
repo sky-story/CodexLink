@@ -121,7 +121,7 @@ node scripts/private-service.cjs start
 node scripts/private-service.cjs status
 ```
 
-On first setup, a pairing QR code normally opens in your Mac browser. Scan it **inside the Codex Remote iPhone app**. Do not use an online QR decoder.
+On first setup, a pairing QR code normally opens in your Mac browser. Scan it **inside the CodexLink iPhone app**. Do not use an online QR decoder.
 
 To display a new pairing code when needed:
 
@@ -153,7 +153,7 @@ Lock your phone and send an explicit test:
 node scripts/bark-notifications.cjs --send-test
 ```
 
-`accepted` means the provider accepted the request; check the actual lock screen. Notifications arrive through **Bark**. Open Codex Remote to handle approvals. This works with free Apple signing; this app's own APNs delivery remains unverified.
+`accepted` means the provider accepted the request; check the actual lock screen. Notifications arrive through **Bark**. Open CodexLink to handle approvals. This works with free Apple signing; this app's own APNs delivery remains unverified.
 
 Generic notifications are the default. To distinguish concurrent sessions:
 
@@ -204,7 +204,7 @@ xcodebuild -jobs 2 -project CodexMobile/CodexMobile.xcodeproj \
 
 Bridge tests isolate device state and mock Keychain. Never point tests at a real pairing directory. Raw physical-device records, local experiments, and old screenshots stay outside the published source. Real model experiments should use an isolated workspace and consume normal Codex usage.
 
-Repeated outages, app force-quit, sleep/wake, daemon crashes, approval races, and long-running use need broader validation. Retained upstream UI for images, voice, Git, or MCP does not imply full support in shared mode. Source directories, the installed app name, and some upstream help screens still use “Codex Remote”; this README defines the fork's supported workflow.
+Repeated outages, app force-quit, sleep/wake, daemon crashes, approval races, and long-running use need broader validation. Retained upstream UI for images, voice, Git, or MCP does not imply full support in shared mode. The installed app is named CodexLink. Source directories and technical identifiers retain their existing names for compatibility; this README defines the fork's supported workflow.
 
 ## License, privacy, and support
 

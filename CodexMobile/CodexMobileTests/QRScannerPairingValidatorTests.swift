@@ -20,9 +20,9 @@ final class QRScannerPairingValidatorTests: XCTestCase {
             return XCTFail("Expected a bridge update prompt for mismatched QR versions.")
         }
 
-        XCTAssertEqual(prompt.title, "Update Codex Remote on your Mac before scanning")
+        XCTAssertEqual(prompt.title, "Update CodexLink on your Mac before scanning")
         XCTAssertEqual(prompt.command, "npm install -g codex-remote@latest")
-        XCTAssertTrue(prompt.message.contains("different Codex Remote npm version"))
+        XCTAssertTrue(prompt.message.contains("different CodexLink npm version"))
     }
 
     func testLegacyBridgePayloadRequiresBridgeUpdateBeforeScanning() {
@@ -35,7 +35,7 @@ final class QRScannerPairingValidatorTests: XCTestCase {
         }
 
         XCTAssertEqual(prompt.command, "npm install -g codex-remote@latest")
-        XCTAssertTrue(prompt.message.contains("older Codex Remote bridge"))
+        XCTAssertTrue(prompt.message.contains("older CodexLink bridge"))
     }
 
     func testValidPayloadReturnsSuccess() {

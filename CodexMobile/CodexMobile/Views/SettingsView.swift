@@ -659,7 +659,7 @@ private struct SettingsBridgeVersionCard: View {
         }
 
         if installedVersion.compare(latestVersion, options: .numeric) == .orderedAscending {
-            return "A newer Codex Remote package is available on npm."
+            return "A newer CodexLink package is available on npm."
         }
 
         return "This Mac is running a different build than the current npm latest."
@@ -780,7 +780,7 @@ private struct SettingsAboutCard: View {
                 isShowingAbout = true
             } label: {
                 settingsAccessoryRow(
-                    title: "How Codex Remote Works",
+                    title: "How CodexLink Works",
                     leading: {
                         Image(systemName: "info.circle")
                             .font(AppFont.subheadline(weight: .medium))

@@ -1,5 +1,5 @@
 // FILE: GPTVoiceSetupSheet.swift
-// Purpose: Shows a compact info sheet that explains how Codex Remote voice uses the paired computer's ChatGPT session.
+// Purpose: Shows a compact info sheet that explains how CodexLink voice uses the paired computer's ChatGPT session.
 // Layer: View
 // Exports: GPTVoiceSetupSheet
 // Depends on: SwiftUI, AppFont
@@ -23,7 +23,7 @@ struct GPTVoiceSetupSheet: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("GPT voice uses the ChatGPT session on your computer")
                             .font(AppFont.subheadline(weight: .semibold))
-                        Text("Codex Remote does not keep a separate GPT voice login on the iPhone. It uses the ChatGPT session already active on your paired computer.")
+                        Text("CodexLink does not keep a separate GPT voice login on the iPhone. It uses the ChatGPT session already active on your paired computer.")
                             .font(AppFont.caption())
                             .foregroundStyle(.secondary)
                     }
@@ -33,12 +33,12 @@ struct GPTVoiceSetupSheet: View {
                     infoStep(
                         number: "1",
                         title: "You speak on the iPhone",
-                        detail: "Codex Remote records the voice clip locally on the phone when you hold to talk."
+                        detail: "CodexLink records the voice clip locally on the phone when you hold to talk."
                     )
                     infoStep(
                         number: "2",
                         title: "The phone checks your paired computer",
-                        detail: "Codex Remote asks the paired computer bridge for the active ChatGPT session that is already connected there."
+                        detail: "CodexLink asks the paired computer bridge for the active ChatGPT session that is already connected there."
                     )
                     infoStep(
                         number: "3",
@@ -47,7 +47,7 @@ struct GPTVoiceSetupSheet: View {
                     )
                     infoStep(
                         number: "4",
-                        title: "The text comes back to Codex Remote",
+                        title: "The text comes back to CodexLink",
                         detail: "The transcript returns to the app and gets dropped into your message composer."
                     )
                 }

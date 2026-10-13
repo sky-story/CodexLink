@@ -4,12 +4,12 @@ const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { resolveCodexRemoteStateDir } = require('./daemon-state');
 const BODIES = Object.freeze({
-  completed: 'Codex 任务已完成，请打开 Codex Remote 查看。',
-  failed: 'Codex 任务执行失败，请打开 Codex Remote 查看。',
+  completed: 'Codex 任务已完成，请打开 CodexLink 查看。',
+  failed: 'Codex 任务执行失败，请打开 CodexLink 查看。',
   interrupted: 'Codex 当前任务已中断。',
-  approval: 'Codex 有一项操作等待审批，请打开 Codex Remote 审核。',
-  input: 'Codex 需要你的补充信息，请打开 Codex Remote 查看。',
-  test: 'Codex Remote 锁屏通知测试。收到此通知后，请告诉我。',
+  approval: 'Codex 有一项操作等待审批，请打开 CodexLink 审核。',
+  input: 'Codex 需要你的补充信息，请打开 CodexLink 查看。',
+  test: 'CodexLink 锁屏通知测试。收到此通知后，请告诉我。',
 });
 const TITLES = Object.freeze({
   completed: 'Codex · 任务已完成',
@@ -55,7 +55,7 @@ async function sendBark(config, kind, { fetchImpl = fetch, session } = {}) {
     const response = await fetchImpl(config.endpoint, {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(8000),
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ device_key: config.deviceKey, title: presentation ? TITLES[kind] : 'Codex Remote', body: presentation?.body || BODIES[kind], group: presentation?.group || 'Codex Remote', isArchive: '0' }),
+      body: JSON.stringify({ device_key: config.deviceKey, title: presentation ? TITLES[kind] : 'CodexLink', body: presentation?.body || BODIES[kind], group: presentation?.group || 'Codex Remote', isArchive: '0' }),
     });
     if (!response.ok) return { status: 'rejected', httpStatus: response.status };
     const body = await response.json();

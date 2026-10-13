@@ -208,7 +208,7 @@ extension CodexService {
         }
     }
 
-    // Refreshes only the bridge package version state so Codex Remote updates stay independent from GPT UX.
+    // Refreshes only the bridge package version state so CodexLink updates stay independent from GPT UX.
     func refreshBridgeVersionState(allowAvailableBridgeUpdatePrompt: Bool = false) async {
         guard isConnected else {
             return
@@ -800,14 +800,14 @@ extension CodexService {
         if let currentVersion = currentVersion?.trimmingCharacters(in: .whitespacesAndNewlines),
            !currentVersion.isEmpty {
             message =
-                "This computer bridge is running Codex Remote \(currentVersion), but this iPhone app requires Codex Remote \(CodexService.minimumSupportedBridgePackageVersion) or newer. Update the npm package on your computer, then reconnect."
+                "This computer bridge is running CodexLink \(currentVersion), but this iPhone app requires CodexLink \(CodexService.minimumSupportedBridgePackageVersion) or newer. Update the npm package on your computer, then reconnect."
         } else {
             message =
-                "This computer bridge is too old for this version of Codex Remote iPhone. Update the Codex Remote npm package on your computer to \(CodexService.minimumSupportedBridgePackageVersion) or newer, then reconnect."
+                "This computer bridge is too old for this version of CodexLink iPhone. Update the CodexLink npm package on your computer to \(CodexService.minimumSupportedBridgePackageVersion) or newer, then reconnect."
         }
 
         return CodexBridgeUpdatePrompt(
-            title: "Update Codex Remote on your computer to reconnect",
+            title: "Update CodexLink on your computer to reconnect",
             message: message,
             command: minimumBridgePackageUpdateCommand
         )
@@ -868,16 +868,16 @@ extension CodexService {
         latestVersion: String
     ) -> CodexBridgeUpdatePrompt {
         CodexBridgeUpdatePrompt(
-            title: "A newer Codex Remote update is available on your computer",
-            message: "This computer bridge is running Codex Remote \(currentVersion), and npm now has Codex Remote \(latestVersion). Update the package on your computer when you're ready, then reconnect to start using the newer build.",
+            title: "A newer CodexLink update is available on your computer",
+            message: "This computer bridge is running CodexLink \(currentVersion), and npm now has CodexLink \(latestVersion). Update the package on your computer when you're ready, then reconnect to start using the newer build.",
             command: minimumBridgePackageUpdateCommand
         )
     }
 
     private func forcedBridgePackageUpdatePrompt(currentVersion: String) -> CodexBridgeUpdatePrompt {
         CodexBridgeUpdatePrompt(
-            title: "Update Codex Remote on your computer to reconnect",
-            message: "This computer bridge is running Codex Remote \(currentVersion). Update the Codex Remote CLI on your computer to \(forcedBridgeUpgradeTargetVersion), then reconnect.",
+            title: "Update CodexLink on your computer to reconnect",
+            message: "This computer bridge is running CodexLink \(currentVersion). Update the CodexLink CLI on your computer to \(forcedBridgeUpgradeTargetVersion), then reconnect.",
             command: forcedBridgeUpgradeCommand
         )
     }

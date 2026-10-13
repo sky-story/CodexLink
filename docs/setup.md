@@ -108,7 +108,7 @@ macOS 首次可能显示“想要控制 iTerm”的自动化授权。需要在 M
 
 ## 免费签名下的 Bark 锁屏提醒
 
-Bark 作为通知接收 App 使用其自身的 APNs 能力，Codex Remote 不需要新增推送 entitlement。用户已在真机锁屏确认收到测试通知。Mac Bridge 独立监听共享 daemon 的任务完成、失败、中断、等待审批和补充输入事件，手机 App 被挂起时仍可发起通知。提醒打开的是 Bark；审批仍须回到 Codex Remote 查看准确内容并操作。
+Bark 作为通知接收 App 使用其自身的 APNs 能力，CodexLink 不需要新增推送 entitlement。用户已在真机锁屏确认收到测试通知。Mac Bridge 独立监听共享 daemon 的任务完成、失败、中断、等待审批和补充输入事件，手机 App 被挂起时仍可发起通知。提醒打开的是 Bark；审批仍须回到 CodexLink 查看准确内容并操作。
 
 私密配置位于 `~/.codex-remote/bark-config.json`，权限必须为 `600`，格式为 `enabled`、`serverUrl`（HTTPS 服务根地址）、`deviceKey` 和可选的 `includeSessionLabel`（默认 false）。不要把真实 Key 放入仓库、URL 日志或公开文档。配置缺失或错误只关闭 Bark，不影响会话控制。停用时把 `enabled` 改为 `false`，再执行 `node scripts/private-service.cjs restart`。
 
@@ -118,7 +118,7 @@ node scripts/bark-notifications.cjs --status
 node scripts/bark-notifications.cjs --send-test
 ```
 
-默认发送固定标题“Codex Remote”和通用正文。用户希望区分同时运行的会话时，可执行 `node scripts/bark-notifications.cjs --session-labels on`，再用管理脚本 `restart` 加载；恢复通用标题使用 `--session-labels off`。不会覆盖设备 Key 或其他配置。
+默认发送固定标题“CodexLink”和通用正文。用户希望区分同时运行的会话时，可执行 `node scripts/bark-notifications.cjs --session-labels on`，再用管理脚本 `restart` 加载；恢复通用标题使用 `--session-labels off`。不会覆盖设备 Key 或其他配置。
 
 开启后标题显示简短状态，如 `Codex · 任务已完成`、`Codex · 等待审批`；正文为 `会话名称 · 8位短标识`，替换原来的通用操作提示，让较长的名称在正文区域显示。优先读取 daemon 的正式会话名称，没有名称时只使用 cwd 的末级目录名，再无信息则显示“未命名会话”。短标识来自完整线程 ID 的 SHA-256 前 8 位，避免 UUIDv7 相邻会话前缀相同；用于区分显示，不是安全标识。Bark group 按短标识稳定分组，重命名不改变分组。同一线程的完成、失败、中断和审批都使用此标识。
 

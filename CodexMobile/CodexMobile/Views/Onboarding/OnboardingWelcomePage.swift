@@ -50,7 +50,7 @@ struct OnboardingWelcomePage: View {
                         )
 
                     VStack(spacing: 8) {
-                        Text("Codex Remote")
+                        Text("CodexLink")
                             .font(AppFont.system(size: 32, weight: .bold))
 
                         Text("Control Codex from your iPhone.")
