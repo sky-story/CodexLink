@@ -711,6 +711,55 @@ final class TurnTimelineReducerTests: XCTestCase {
         XCTAssertEqual(deduped.map(\.id), ["diff-2"])
     }
 
+    // Signatures are cached per message ID; a streamed text change must not reuse the old parse.
+    func testRemoveDuplicateFileChangeMessagesReparsesWhenSameMessageTextChanges() {
+        let now = Date()
+        func diffText(_ path: String) -> String {
+            """
+            Status: completed
+
+            Path: \(path)
+            Kind: update
+            Totals: +2 -1
+            """
+        }
+        func messages(olderPath: String) -> [CodexMessage] {
+            [
+                makeMessage(
+                    id: "cache-diff-older",
+                    threadID: "thread",
+                    role: .system,
+                    kind: .fileChange,
+                    text: diffText(olderPath),
+                    createdAt: now,
+                    turnID: "turn-1",
+                    itemID: "cache-filechange-1",
+                    isStreaming: true
+                ),
+                makeMessage(
+                    id: "cache-diff-newer",
+                    threadID: "thread",
+                    role: .system,
+                    kind: .fileChange,
+                    text: diffText("Sources/Other.swift"),
+                    createdAt: now.addingTimeInterval(1),
+                    turnID: "turn-1",
+                    itemID: "cache-filechange-2",
+                    isStreaming: false
+                ),
+            ]
+        }
+
+        let distinct = TurnTimelineReducer.removeDuplicateFileChangeMessages(in: messages(olderPath: "Sources/App.swift"))
+        XCTAssertEqual(distinct.map(\.id), ["cache-diff-older", "cache-diff-newer"])
+
+        let converged = TurnTimelineReducer.removeDuplicateFileChangeMessages(in: messages(olderPath: "Sources/Other.swift"))
+        XCTAssertEqual(converged.map(\.id), ["cache-diff-newer"])
+
+        let diverged = TurnTimelineReducer.removeDuplicateFileChangeMessages(in: messages(olderPath: "Sources/App.swift"))
+        XCTAssertEqual(diverged.map(\.id), ["cache-diff-older", "cache-diff-newer"])
+    }
+
     func testRemoveDuplicateFileChangeMessagesIgnoresStatusOnlyDifferences() {
         let now = Date()
         let messages = [

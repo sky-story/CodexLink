@@ -319,6 +319,10 @@ final class CodexService {
     var supportsMacTerminalOpen = false
     var newChatMacPromptThreadIDs: Set<String> = []
     var supportsSharedSessionSettings = false
+    // Bridge can return Turn status without item payloads, avoiding full-history polls.
+    var supportsTurnStateSnapshot = false
+    // Any inbound frame proves the Mac path is alive; used to bound the connect handshake.
+    var lastInboundMessageAt = Date.distantPast
     var sharedSessionSettings: [String: SharedSessionSettings] = [:]
     var sharedSettingsRevision: [String: Int] = [:]
     var sharedSettingsError: [String: String] = [:]
@@ -639,7 +643,12 @@ final class CodexService {
         self.phoneIdentityState = codexPhoneIdentityStateFromSecureStore()
         self.trustedMacRegistry = codexTrustedMacRegistryFromSecureStore()
         self.lastTrustedMacDeviceId = SecureStore.readString(for: CodexSecureKeys.lastTrustedMacDeviceId)
-        let loadedMessages = messagePersistence.load().mapValues { messages in
+        let persistedMessages = ConnectionTrace.shared.measure("cache_load") { messagePersistence.load() }
+        ConnectionTrace.shared.event("cache_size", [
+            "threads": persistedMessages.count,
+            "messages": persistedMessages.values.reduce(0) { $0 + $1.count },
+        ])
+        let loadedMessages = persistedMessages.mapValues { messages in
             messages.map { message in
                 var value = message
                 // Streaming cannot survive app relaunch; clear stale flags loaded from disk.

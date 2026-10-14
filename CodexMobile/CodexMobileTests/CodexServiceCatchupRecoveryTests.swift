@@ -444,3 +444,48 @@ final class NewChatTerminalTests: XCTestCase {
         XCTAssertNil(defaults.string(forKey: "macTerminalOpen.pending.fixture-thread"))
     }
 }
+
+@MainActor
+final class TurnStateSnapshotTransportTests: XCTestCase {
+    private static var retainedServices: [CodexService] = []
+
+    private func resolveTurn(supportsSnapshot: Bool) async throws -> (turnID: String?, methods: [String]) {
+        let service = CodexService()
+        Self.retainedServices.append(service)
+        service.isConnected = true
+        service.isInitialized = true
+        service.supportsTurnStateSnapshot = supportsSnapshot
+        var methods: [String] = []
+        service.requestTransportOverride = { method, _ in
+            methods.append(method)
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([
+                    "thread": .object([
+                        "id": .string("thread-1"),
+                        "turns": .array([
+                            .object(["id": .string("turn-done"), "status": .string("completed")]),
+                            .object(["id": .string("turn-live"), "status": .string("inProgress")]),
+                        ]),
+                    ]),
+                ]),
+                includeJSONRPC: false
+            )
+        }
+        let turnID = try await service.resolveInFlightTurnID(threadId: "thread-1")
+        return (turnID, methods)
+    }
+
+    // Bridges that advertise the snapshot avoid pulling full item history for every status poll.
+    func testUsesLightweightTurnStateWhenBridgeAdvertisesIt() async throws {
+        let result = try await resolveTurn(supportsSnapshot: true)
+        XCTAssertEqual(result.turnID, "turn-live")
+        XCTAssertEqual(result.methods, ["remote/turnState"])
+    }
+
+    func testFallsBackToFullThreadReadForOlderBridges() async throws {
+        let result = try await resolveTurn(supportsSnapshot: false)
+        XCTAssertEqual(result.turnID, "turn-live")
+        XCTAssertEqual(result.methods, ["thread/read"])
+    }
+}

@@ -82,6 +82,7 @@ extension CodexService {
             )
         }
 
+        ConnectionTrace.shared.requestSent(key: requestKey, method: method)
         return try await withCheckedThrowingContinuation { continuation in
             pendingRequests[requestKey] = continuation
 

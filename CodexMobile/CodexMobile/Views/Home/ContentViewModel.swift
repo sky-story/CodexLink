@@ -408,7 +408,10 @@ extension ContentViewModel {
     // Chooses the best reconnect path: resolve the live trusted-Mac session first, then fall back to the saved QR session.
     func preferredReconnectURL(codex: CodexService) async -> String? {
         shouldRetryTrustedResolve = false
-        switch await trustedReconnectResolution(codex: codex) {
+        let resolveStart = Date()
+        let resolution = await trustedReconnectResolution(codex: codex)
+        ConnectionTrace.shared.event("trusted_resolve", ["ms": (Date().timeIntervalSince(resolveStart) * 1000).rounded()])
+        switch resolution {
         case .use(let resolvedURL):
             return resolvedURL
         case .fallbackToSaved:

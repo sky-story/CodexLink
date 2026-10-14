@@ -61,8 +61,25 @@ extension CodexService {
         }
 
         do {
+            guard ConnectionTrace.isEnabled else {
+                handleIncomingRPCMessage(try decoder.decode(RPCMessage.self, from: payloadData))
+                return
+            }
+            let decodeStart = DispatchTime.now().uptimeNanoseconds
             let message = try decoder.decode(RPCMessage.self, from: payloadData)
+            let handleStart = DispatchTime.now().uptimeNanoseconds
+            var fields: [String: Any] = ["bytes": payloadData.count]
+            if let method = message.method {
+                fields["method"] = normalizedIncomingMethodName(method)
+            } else if let id = message.id, let request = ConnectionTrace.shared.requestCompleted(key: idKey(from: id)) {
+                fields["method"] = "resp:" + request.method
+                fields["latencyMs"] = request.latencyMs.rounded()
+            }
             handleIncomingRPCMessage(message)
+            let end = DispatchTime.now().uptimeNanoseconds
+            fields["decodeMs"] = (Double(handleStart - decodeStart) / 100_000).rounded() / 10
+            fields["handleMs"] = (Double(end - handleStart) / 100_000).rounded() / 10
+            ConnectionTrace.shared.event("rx", fields)
         } catch {
             lastErrorMessage = "Unable to decode server payload"
         }
@@ -70,6 +87,7 @@ extension CodexService {
 
     // Handles a pre-decoded RPC message from off-actor transport paths.
     func handleDecodedRPCResult(_ result: WireMessagePreDecoder.Result, rawText: String) {
+        lastInboundMessageAt = Date()
         switch result {
         case .message(let message):
             lastRawMessage = rawText

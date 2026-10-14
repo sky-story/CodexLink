@@ -135,3 +135,40 @@ test('one unsupported thread does not prevent discovery of other live sessions',
     assert(!calls.some(c => c.method === 'thread/start' || c.method === 'turn/start'));
   } finally { runtime.shutdown(); peer?.terminate(); await new Promise(r => wss.close(r)); store.close(); }
 });
+
+test('turn state snapshot reads the same daemon locally and strips item payloads for the phone', async () => {
+  const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' }); await once(wss, 'listening');
+  const calls = []; let peer;
+  const bigText = 'x'.repeat(200000);
+  wss.on('connection', ws => {
+    peer = ws;
+    ws.on('message', raw => {
+      const msg = JSON.parse(raw); calls.push(msg); if (msg.id == null) return;
+      let result = {};
+      if (msg.method === 'thread/loaded/list') result = { data: [], nextCursor: null };
+      if (msg.method === 'thread/read') result = { thread: { id: 'thread-big', name: 'secret title', turns: [
+        { id: 'turn-1', status: 'completed', items: [{ type: 'agentMessage', text: bigText }] },
+        { id: 'turn-2', status: 'inProgress', items: [{ type: 'userMessage', text: bigText }] },
+      ] } };
+      ws.send(JSON.stringify({ id: msg.id, result }));
+    });
+  });
+  const store = new ControlStore(':memory:'); const received = [];
+  const runtime = createSharedRuntime({ endpoint: `ws://127.0.0.1:${wss.address().port}`, store });
+  runtime.onMessage(raw => received.push(raw));
+  const until = async fn => { for (let i = 0; i < 200; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 5)); } throw new Error('Timeout'); };
+  const reply = id => received.map(r => JSON.parse(r)).find(e => e.id === id);
+  try {
+    await until(() => received.some(r => JSON.parse(r).method === 'remote/status'));
+    runtime.send(JSON.stringify({ id: 'turns', method: 'remote/turnState', params: { threadId: 'thread-big' } }));
+    await until(() => reply('turns'));
+    const raw = received.find(r => JSON.parse(r).id === 'turns');
+    assert.deepEqual(reply('turns').result, { thread: { id: 'thread-big', turns: [{ id: 'turn-1', status: 'completed' }, { id: 'turn-2', status: 'inProgress' }] } });
+    assert(raw.length < 1000, `payload should be small, got ${raw.length} bytes`);
+    assert.deepEqual(calls.find(c => c.method === 'thread/read').params, { threadId: 'thread-big', includeTurns: true });
+    runtime.send(JSON.stringify({ id: 'bad', method: 'remote/turnState', params: {} }));
+    await until(() => reply('bad'));
+    assert.equal(reply('bad').error.code, -32602);
+    assert(!calls.some(c => ['turn/start', 'turn/interrupt', 'turn/steer'].includes(c.method)));
+  } finally { runtime.shutdown(); peer?.terminate(); await new Promise(r => wss.close(r)); store.close(); }
+});

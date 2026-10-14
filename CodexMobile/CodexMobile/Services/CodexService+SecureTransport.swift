@@ -205,6 +205,7 @@ extension CodexService {
 
     // Handles raw relay JSON before any JSON-RPC decoding so secure controls stay separate.
     func processIncomingWireText(_ text: String) {
+        lastInboundMessageAt = Date()
         if let kind = wireMessageKind(from: text) {
             switch kind {
             case "serverHello", "secureReady", "secureError":
@@ -576,8 +577,11 @@ private extension CodexService {
                 ciphertext: Data(base64EncodedOrEmpty: envelope.ciphertext),
                 tag: Data(base64EncodedOrEmpty: envelope.tag)
             )
+            let decryptStart = DispatchTime.now().uptimeNanoseconds
             let plaintext = try AES.GCM.open(sealedBox, using: secureSession.macToPhoneKey)
             let payload = try JSONDecoder().decode(SecureApplicationPayload.self, from: plaintext)
+            let decryptMs = Double(DispatchTime.now().uptimeNanoseconds - decryptStart) / 1_000_000
+            if decryptMs >= 2 { ConnectionTrace.shared.event("decrypt", ["ms": (decryptMs * 10).rounded() / 10, "bytes": plaintext.count]) }
             secureSession.lastInboundCounter = envelope.counter
             self.secureSession = secureSession
 
@@ -586,10 +590,12 @@ private extension CodexService {
                     return
                 }
                 lastAppliedBridgeOutboundSeq = bridgeOutboundSeq
-                SecureStore.writeString(
-                    String(bridgeOutboundSeq),
-                    for: CodexSecureKeys.relayLastAppliedBridgeOutboundSeq
-                )
+                ConnectionTrace.shared.measure("keychain_seq_write") {
+                    SecureStore.writeString(
+                        String(bridgeOutboundSeq),
+                        for: CodexSecureKeys.relayLastAppliedBridgeOutboundSeq
+                    )
+                }
             }
 
             lastRawMessage = payload.payloadText

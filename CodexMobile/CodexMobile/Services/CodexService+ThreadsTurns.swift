@@ -2046,15 +2046,24 @@ extension CodexService {
     ) {
         let response: RPCMessage
         do {
-            response = try await sendRequest(
-                method: "thread/read",
-                params: .object([
-                    "threadId": .string(threadId),
-                    "includeTurns": .bool(true),
-                ])
-            )
+            if supportsTurnStateSnapshot {
+                // Same daemon read on the Mac, minus item payloads that can be megabytes per poll.
+                response = try await sendRequest(
+                    method: "remote/turnState",
+                    params: .object(["threadId": .string(threadId)])
+                )
+            } else {
+                response = try await sendRequest(
+                    method: "thread/read",
+                    params: .object([
+                        "threadId": .string(threadId),
+                        "includeTurns": .bool(true),
+                    ])
+                )
+            }
         } catch {
-            guard shouldRetryThreadReadTurnSnapshotWithSnakeCase(error) else {
+            guard !supportsTurnStateSnapshot,
+                  shouldRetryThreadReadTurnSnapshotWithSnakeCase(error) else {
                 throw error
             }
 

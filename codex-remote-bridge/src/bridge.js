@@ -907,6 +907,7 @@ function startBridge({
           bridgeManaged: true,
           sharedSession: codex.mode === "shared",
           sessionSettings: codex.mode === "shared",
+          turnStateSnapshot: codex.mode === "shared",
           controlProtocol: codex.mode === "shared" ? 1 : 0,
           macTerminalOpen: codex.mode === "shared" && process.platform === "darwin",
         },

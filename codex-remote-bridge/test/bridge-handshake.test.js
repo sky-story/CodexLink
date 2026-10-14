@@ -63,6 +63,7 @@ test('phone initialize and reconnect advertise shared settings through the outer
     router.initialize(id);
     const response = router.replies.find(r => r.id === id);
     assert.equal(response?.result?.sessionSettings, true);
+    assert.equal(response.result.turnStateSnapshot, true);
     assert.equal(response.result.sharedSession, true);
     assert.equal(response.result.macTerminalOpen, true);
   }
@@ -73,4 +74,5 @@ test('non-shared transport never advertises shared settings', () => {
   const router = phoneRouter('spawn');
   router.initialize('legacy');
   assert.notEqual(router.replies[0]?.result?.sessionSettings, true);
+  assert.notEqual(router.replies[0]?.result?.turnStateSnapshot, true);
 });

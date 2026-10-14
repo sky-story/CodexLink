@@ -43,7 +43,7 @@ struct SharedSessionComposer: View {
         .padding(12).background(.regularMaterial)
 
         .task(id: codex.isConnected) {
-            await codex.recoverSharedControl(threadID: threadID)
+            await ConnectionTrace.shared.measure("recover_shared_control") { await codex.recoverSharedControl(threadID: threadID) }
             if codex.isConnected && codex.availableModels.isEmpty { try? await codex.listModels() }
         }
         .onChange(of: scenePhase) { _, phase in

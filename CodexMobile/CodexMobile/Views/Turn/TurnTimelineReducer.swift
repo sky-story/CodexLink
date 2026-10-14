@@ -756,18 +756,40 @@ enum TurnTimelineReducer {
 
     // Keys file-change cards by turn + rendered payload so repeated turn/diff snapshots collapse to one row.
     // Falls back to full normalized text so even unparseable messages with identical content get deduped.
-    private static func duplicateFileChangeKey(for message: CodexMessage) -> String? {
-        let turnLabel = normalizedIdentifier(message.turnId) ?? "turnless"
-
-        if let summaryKey = TurnFileChangeSummaryParser.dedupeKey(from: message.text) {
-            return "\(turnLabel)|\(summaryKey)"
-        }
-
-        let normalizedText = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedText.isEmpty else {
+    private static func duplicateFileChangeKey(turnId: String?, payloadKey: String?) -> String? {
+        guard let payloadKey else {
             return nil
         }
-        return "\(turnLabel)|\(normalizedText)"
+        return "\(normalizedIdentifier(turnId) ?? "turnless")|\(payloadKey)"
+    }
+
+    // Parses only the text-derived parts of a file-change signature. Diff parsing dominates
+    // projection cost, so results are reused per message while its text is unchanged.
+    private static func fileChangeTextSignature(for text: String) -> FileChangeTextSignature {
+        let payloadKey: String?
+        if let summaryKey = TurnFileChangeSummaryParser.dedupeKey(from: text) {
+            payloadKey = summaryKey
+        } else {
+            let normalizedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            payloadKey = normalizedText.isEmpty ? nil : normalizedText
+        }
+
+        let entries = TurnFileChangeSummaryParser.parse(from: text)?.entries ?? []
+        let singleEntryDescriptor: FileChangeSingleEntryDescriptor? = {
+            guard entries.count == 1, let entry = entries.first else { return nil }
+            return FileChangeSingleEntryDescriptor(
+                path: entry.path,
+                additions: entry.additions,
+                deletions: entry.deletions,
+                action: entry.action
+            )
+        }()
+
+        return FileChangeTextSignature(
+            payloadKey: payloadKey,
+            paths: Set(entries.map(\.path)),
+            singleEntryDescriptor: singleEntryDescriptor
+        )
     }
 
     // Captures the parts of a file-change row that matter for timeline dedupe.
@@ -780,21 +802,15 @@ enum TurnTimelineReducer {
         }
 
         let turnId = normalizedIdentifier(message.turnId)
-        let key = duplicateFileChangeKey(for: message)
-        let entries = TurnFileChangeSummaryParser.parse(from: message.text)?.entries ?? []
-
-        let paths = Set(
-            entries.map(\.path)
-        )
-        let singleEntryDescriptor: FileChangeSingleEntryDescriptor? = {
-            guard entries.count == 1, let entry = entries.first else { return nil }
-            return FileChangeSingleEntryDescriptor(
-                path: entry.path,
-                additions: entry.additions,
-                deletions: entry.deletions,
-                action: entry.action
-            )
-        }()
+        let textSignature = FileChangeTextSignatureCache.shared.signature(
+            messageID: message.id,
+            text: message.text
+        ) {
+            fileChangeTextSignature(for: message.text)
+        }
+        let key = duplicateFileChangeKey(turnId: message.turnId, payloadKey: textSignature.payloadKey)
+        let paths = textSignature.paths
+        let singleEntryDescriptor = textSignature.singleEntryDescriptor
 
         // Need at least a key or paths to participate in dedup.
         guard key != nil || !paths.isEmpty || singleEntryDescriptor != nil else {
@@ -905,4 +921,44 @@ private struct FileChangeSingleEntryDescriptor: Equatable {
     let additions: Int
     let deletions: Int
     let action: TurnFileChangeAction?
+}
+
+private struct FileChangeTextSignature {
+    let payloadKey: String?
+    let paths: Set<String>
+    let singleEntryDescriptor: FileChangeSingleEntryDescriptor?
+}
+
+// Every incoming event re-projects the whole timeline, so re-parsing each historical diff
+// made a single streamed token cost hundreds of milliseconds on long chats. Entries are
+// keyed by message ID and only reused when the stored text is equal, so edits never go stale.
+private final class FileChangeTextSignatureCache: @unchecked Sendable {
+    static let shared = FileChangeTextSignatureCache()
+
+    private let lock = NSLock()
+    private var entries: [String: (text: String, signature: FileChangeTextSignature)] = [:]
+    private let capacity = 4096
+
+    func signature(
+        messageID: String,
+        text: String,
+        compute: () -> FileChangeTextSignature
+    ) -> FileChangeTextSignature {
+        lock.lock()
+        if let cached = entries[messageID], cached.text == text {
+            lock.unlock()
+            return cached.signature
+        }
+        lock.unlock()
+
+        let signature = compute()
+
+        lock.lock()
+        if entries.count >= capacity {
+            entries.removeAll(keepingCapacity: true)
+        }
+        entries[messageID] = (text, signature)
+        lock.unlock()
+        return signature
+    }
 }

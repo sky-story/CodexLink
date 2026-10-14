@@ -55,7 +55,9 @@ extension CodexService {
         let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
         let transport: CodexWebSocketTransport
         do {
-            transport = try await establishWebSocketConnection(url: url, token: trimmedToken, role: role)
+            transport = try await ConnectionTrace.shared.measure("ws_open") {
+                try await establishWebSocketConnection(url: url, token: trimmedToken, role: role)
+            }
         } catch {
             let friendlyMessage = userFacingConnectError(
                 error: error,
@@ -91,13 +93,14 @@ extension CodexService {
         let isTrustedReconnectAttempt = hasTrustedReconnectContext
 
         do {
-            try await performSecureHandshake()
+            try await ConnectionTrace.shared.measure("secure_handshake") { try await performSecureHandshake() }
 
             isConnected = true
             shouldAutoReconnectOnForeground = false
             connectionRecoveryState = .idle
             lastErrorMessage = nil
-            try await initializeSession()
+            try await ConnectionTrace.shared.measure("initialize") { try await initializeSessionWithInactivityTimeout() }
+            ConnectionTrace.shared.event("socket_ready")
             trustedReconnectFailureCount = 0
             if secureSession != nil {
                 secureConnectionState = .encrypted
@@ -170,6 +173,7 @@ extension CodexService {
         }
         supportsStructuredSkillInput = true
         supportsTurnCollaborationMode = false
+        supportsTurnStateSnapshot = false
         hasResolvedRateLimitsSnapshot = false
         bridgeInstalledVersion = nil
         latestBridgePackageVersion = nil
@@ -276,6 +280,38 @@ extension CodexService {
         clearSavedRelaySession()
     }
 
+    // Requests have no per-call deadline, so a relay path that dies without a socket error
+    // used to leave connect waiting forever. Fail only after a silent gap: a Bridge still
+    // replaying a backlog keeps sending frames and is never cut off.
+    func initializeSessionWithInactivityTimeout(silenceLimit: TimeInterval = 15) async throws {
+        lastInboundMessageAt = Date()
+        let timeoutError = CodexServiceError.invalidInput(
+            "Connection timed out after \(Int(silenceLimit))s without a response from the Mac."
+        )
+        let watchdog = Task { @MainActor [weak self] () -> Bool in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self, !Task.isCancelled else { return false }
+                if Date().timeIntervalSince(self.lastInboundMessageAt) > silenceLimit {
+                    self.failAllPendingRequests(with: timeoutError)
+                    return true
+                }
+            }
+            return false
+        }
+        do {
+            try await initializeSession()
+        } catch {
+            watchdog.cancel()
+            throw error
+        }
+        watchdog.cancel()
+        // Some handshake follow-ups swallow errors; never report a silent socket as connected.
+        if await watchdog.value {
+            throw timeoutError
+        }
+    }
+
     func initializeSession() async throws {
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
         let clientInfo: JSONValue = .object([
@@ -298,6 +334,7 @@ extension CodexService {
             supportsSharedSessionSettings = handshake.result?.objectValue?["sessionSettings"]?.boolValue == true
             supportsMacTerminalOpen = handshake.result?.objectValue?["macTerminalOpen"]?.boolValue == true
             supportsSharedSessionControl = handshake.result?.objectValue?["sharedSession"]?.boolValue == true
+            supportsTurnStateSnapshot = handshake.result?.objectValue?["turnStateSnapshot"]?.boolValue == true
             // A successful modern initialize means the runtime accepted the experimental
             // capability negotiation. Keep plan-mode sends enabled unless the runtime
             // explicitly rejects `collaborationMode` on a turn request later.
@@ -454,14 +491,17 @@ extension CodexService {
                     self.postConnectSyncToken = nil
                 }
             }
-            await self.performPostConnectSyncPass(preferredThreadId: preferredThreadId)
+            await ConnectionTrace.shared.measure("post_connect_sync") {
+                await self.performPostConnectSyncPass(preferredThreadId: preferredThreadId)
+            }
         }
     }
 
     // Runs the post-connect sync work that is useful but not required to mark the socket usable.
     func performPostConnectSyncPass(preferredThreadId: String? = nil) async {
-        try? await listModels()
-        try? await listThreads()
+        try? await ConnectionTrace.shared.measure("pc_list_models") { try await listModels() }
+        try? await ConnectionTrace.shared.measure("pc_list_threads") { try await listThreads() }
+        ConnectionTrace.shared.event("pc_threads_ready", ["threads": threads.count])
         if await routePendingNotificationOpenIfPossible(refreshIfNeeded: false) {
             return
         }
@@ -472,10 +512,12 @@ extension CodexService {
         if let threadId = activeThreadId
             ?? resolvedPreferredThreadId
             ?? firstLiveThreadID() {
-            let catchupOutcome = await catchUpRunningThreadIfNeeded(
-                threadId: threadId,
-                shouldForceResume: true
-            )
+            let catchupOutcome = await ConnectionTrace.shared.measure("pc_catchup_active", ["cachedMessages": messages(for: threadId).count]) {
+                await catchUpRunningThreadIfNeeded(
+                    threadId: threadId,
+                    shouldForceResume: true
+                )
+            }
             if catchupOutcome.isRunning {
                 if !catchupOutcome.didRunForcedResume {
                     requestImmediateActiveThreadSync(threadId: threadId)
@@ -530,6 +572,7 @@ extension CodexService {
         connectionRecoveryState = .idle
         supportsStructuredSkillInput = true
         supportsTurnCollaborationMode = false
+        supportsTurnStateSnapshot = false
         bridgeInstalledVersion = nil
         latestBridgePackageVersion = nil
         resumedThreadIDs.removeAll()

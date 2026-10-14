@@ -132,7 +132,7 @@ function createSharedRuntime({ endpoint = defaultEndpoint(), env = process.env, 
     if (!method) {
       throw new Error('Approval and user-input replies require remote/control and a durable commandId');
     }
-    if (method === 'initialize') return { sharedSession: true, controlProtocol: 1, sessionSettings: true, macTerminalOpen: process.platform === 'darwin' && endpoint.startsWith('unix:///') };
+    if (method === 'initialize') return { sharedSession: true, controlProtocol: 1, sessionSettings: true, turnStateSnapshot: true, macTerminalOpen: process.platform === 'darwin' && endpoint.startsWith('unix:///') };
     if (method === 'initialized') return;
     if (method === 'remote/openOnMac') return macTerminal.open(params);
     if (method === 'remote/control') return controller.submit(params);
@@ -146,6 +146,13 @@ function createSharedRuntime({ endpoint = defaultEndpoint(), env = process.env, 
     if (method === 'remote/sync') return { ...(params.snapshotOnly ? {} : store.replay(Number.isSafeInteger(params.after) ? params.after : 0)), approvals: [...controller.approvals.values()] };
     if (method === 'remote/queue') return rpc('thread/queue/list', { threadId: params.threadId });
     if (method === 'thread/read') return readThreadWithLiveFallback(rpc, params);
+    if (method === 'remote/turnState') {
+      if (typeof params.threadId !== 'string' || !params.threadId) throw Object.assign(new Error('threadId is required'), { code: -32602 });
+      // The phone polls Turn status while a task runs. Full items made each poll megabytes
+      // over the relay; read them locally and return only the Turn metadata.
+      const { thread } = await readThreadWithLiveFallback(rpc, { threadId: params.threadId, includeTurns: true });
+      return { thread: { id: thread.id, turns: (thread.turns || []).map(({ items, ...turn }) => turn) } };
+    }
     if (method === 'thread/resume') {
       // Resume by ID rejoins a live runtime. Never replace its permissions/model with phone defaults.
       const result = await rpc(method, { threadId: params.threadId }); attached.add(params.threadId); return result;

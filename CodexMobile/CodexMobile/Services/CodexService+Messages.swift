@@ -522,8 +522,25 @@ extension CodexService {
         latestTurnTerminalStateByThread.removeValue(forKey: threadId)
         clearOutcomeBadge(for: threadId)
         refreshBusyRepoRootsAndDependentTimelineStates()
-        refreshThreadTimelineState(for: threadId)
+        // Streaming events call this for every token. Re-projecting an unchanged
+        // timeline each time stalled the main thread for long chats.
+        if !isThreadTimelineStateCurrent(for: threadId) {
+            refreshThreadTimelineState(for: threadId)
+        }
         updateBackgroundRunGraceTask()
+    }
+
+    // True when the cached projection was built from exactly the current inputs.
+    // Array equality short-circuits on shared storage, so the unchanged case is cheap.
+    func isThreadTimelineStateCurrent(for threadId: String) -> Bool {
+        guard let state = threadTimelineStateByThread[threadId] else {
+            return false
+        }
+        return state.messageRevision == (messageRevisionByThread[threadId] ?? 0)
+            && state.activeTurnID == activeTurnIdByThread[threadId]
+            && state.isThreadRunning == threadHasActiveOrRunningTurn(threadId)
+            && state.latestTurnTerminalState == latestTurnTerminalStateByThread[threadId]
+            && state.messages == (messagesByThread[threadId] ?? [])
     }
 
     // Drops the eager runtime-running flag after a stop attempt proves the server still
