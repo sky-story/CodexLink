@@ -35,7 +35,7 @@ for service in ['camera', 'microphone']:
 run('ui', simulator, 'appearance', 'light')
 run('status_bar', simulator, 'override', '--time', '9:41', '--dataNetwork', 'wifi', '--wifiMode', 'active', '--wifiBars', '3', '--batteryState', 'charged', '--batteryLevel', '100')
 font = ImageFont.truetype('/System/Library/Fonts/STHeiti Medium.ttc', 32)
-for scene in ['queue', 'approval', 'completed']:
+for scene in ['queue', 'approval', 'completed', 'claude-list', 'claude-approval']:
     subprocess.run(['xcrun', 'simctl', 'terminate', simulator, bundle], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     env = {k: v for k, v in os.environ.items() if not k.startswith('SIMCTL_CHILD_CODEX_REMOTE_TEST_')}
     env['SIMCTL_CHILD_CODEX_REMOTE_DOCS_SCENE'] = scene
@@ -49,5 +49,6 @@ for scene in ['queue', 'approval', 'completed']:
     canvas.paste(source, (0, 84))
     draw = ImageDraw.Draw(canvas)
     draw.text((source.width / 2, 42), '演示数据 · 离线预览', font=font, fill='#34465a', anchor='mm')
-    canvas.save(out / f'session-{scene}.png', optimize=True)
-print('Saved three fictional-data UI screenshots. Review all images before publication.')
+    filename = f'{scene}.png' if scene.startswith('claude-') else f'session-{scene}.png'
+    canvas.save(out / filename, optimize=True)
+print('Saved five fictional-data UI screenshots. Review all images before publication.')

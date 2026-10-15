@@ -1,3 +1,5 @@
+<img align="right" src="CodexMobile/CodexMobile/Assets.xcassets/AppLogo.imageset/CodexRemote-iOS-Default-1024x1024.png" width="88" alt="CodexLink App 图标" />
+
 # CodexLink
 
 [English](README.md) | **简体中文**
@@ -19,6 +21,8 @@
 </p>
 
 从左到右：**运行中的会话与队列 → 审批请求 → 完成后的回复**。Steer 补充当前任务，Queue 留给下一轮；审批必须由用户明确处理。截图生成方式见 [图片说明](docs/images/README.md)。
+
+继续看：**[Claude 会话与审批界面](#claude-preview)** · **[Codex + Claude 通知效果](#notification-preview)**。
 
 ## 当前能做什么
 
@@ -150,6 +154,13 @@ node scripts/private-service.cjs pair
 
 ### 5. 可选：用 Bark 接收锁屏提醒
 
+<a id="notification-preview"></a>
+<p align="center">
+  <img src="docs/images/notifications-preview.png" width="800" alt="Codex 与 Claude 通知示意：不同来源使用独立图标，正文显示虚构会话名称，右下角保留 Bark 来源标识" />
+</p>
+
+**通知效果示意，使用虚构会话名称。** Codex 使用 CodexLink 图标，Claude 使用官方 Logo；右下角的小 Bark 图标是 iOS 显示的通知来源标识。会话名称和来源图标均为可选设置，配置方法见下方。
+
 1. iPhone 安装 [Bark](https://github.com/Finb/Bark)，允许通知和锁屏显示。
 2. 从 Bark 首页复制自己的完整推送网址到 **Mac 剪贴板**，不要复制 `curl` 命令。
 3. 在项目目录执行以下命令。网址从标准输入读取，不写入 shell 命令历史：
@@ -209,6 +220,14 @@ clink                           # 新会话，默认以当前目录名命名
 ```
 
 按 Claude 提示确认本地开发通道 **I am using this for local development**，完成项目/MCP 初始授权并保持终端打开。手机侧栏进入 **Claude 会话**，即可发送消息并查看回复。多个项目可分别开终端运行。
+
+<a id="claude-preview"></a>
+<p align="center">
+  <img src="docs/images/claude-list.png" width="280" alt="Claude 会话列表离线演示：显示已接入的虚构待办 App 项目" />
+  <img src="docs/images/claude-approval.png" width="280" alt="Claude 会话离线演示：查看同一会话的消息与工具请求，选择拒绝或本次允许" />
+</p>
+
+**选择会话 → 查看回复与工具请求。** 图片使用真实 SwiftUI 界面和虚构离线数据。手机消息收发已验证；审批图展示已实现的界面，手机审批的实际操作仍待验收。
 
 其他常用方式：
 

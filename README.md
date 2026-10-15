@@ -1,3 +1,5 @@
+<img align="right" src="CodexMobile/CodexMobile/Assets.xcassets/AppLogo.imageset/CodexRemote-iOS-Default-1024x1024.png" width="88" alt="CodexLink app icon" />
+
 # CodexLink
 
 **English** | [简体中文](README.zh-CN.md)
@@ -19,6 +21,8 @@ These screenshots use the actual SwiftUI views, rendered in a **separate simulat
 </p>
 
 Left to right: **running session and queue → approval request → completed response**. Steer updates the current task; Queue schedules input after it. Approvals require an explicit user decision. See [screenshot generation](docs/images/README.md) (Chinese).
+
+Also explore: **[Claude sessions and approvals](#claude-preview)** · **[Codex + Claude notification examples](#notification-preview)**.
 
 ## What works today
 
@@ -148,6 +152,13 @@ The service runs Bridge and Relay together, listening on the Mac's Tailscale add
 
 ### 5. Optional: Bark lock-screen notifications
 
+<a id="notification-preview"></a>
+<p align="center">
+  <img src="docs/images/notifications-preview-en.png" width="800" alt="Illustration of Codex and Claude notifications with distinct app icons, fictional session labels, and the small Bark source badge" />
+</p>
+
+**Notification illustration with fictional session labels.** Codex uses the CodexLink icon; Claude uses its official logo. The titles above mean “Codex · Task completed” and “Claude · Response ready.” iOS retains the small Bark badge to identify the receiving app. Source icons and session labels are optional; setup is below.
+
 1. Install [Bark](https://github.com/Finb/Bark) on iPhone and allow notifications on the lock screen.
 2. Copy your full push URL from Bark to the **Mac clipboard**, without a surrounding `curl` command.
 3. Run the following. The URL is read from stdin rather than stored in shell command history:
@@ -217,6 +228,14 @@ clink                           # New session, named after the current folder
 ```
 
 Confirm **I am using this for local development** when Claude prompts, complete project/MCP consent on Mac, and keep the terminal open. Choose **Claude 会话** in the iPhone sidebar to send messages and read replies. Use separate terminals for separate projects.
+
+<a id="claude-preview"></a>
+<p align="center">
+  <img src="docs/images/claude-list.png" width="280" alt="Offline demo of the Claude session list with a connected fictional to-do app project" />
+  <img src="docs/images/claude-approval.png" width="280" alt="Offline demo of messages in the same Claude session and a one-time tool approval with deny and allow controls" />
+</p>
+
+**Choose a session → read replies and review tool requests.** These are real SwiftUI views rendered with fictional offline data. Phone messaging is verified; the approval screen illustrates the implemented UI, while physical phone approval still needs acceptance.
 
 Other common commands:
 
