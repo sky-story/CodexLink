@@ -21,6 +21,7 @@ class NotificationStore {
         CREATE TABLE IF NOT EXISTS claude_sessions (
           id TEXT PRIMARY KEY, run TEXT NOT NULL, label TEXT, updated_at INTEGER NOT NULL);`);
       this.migrateLegacy(stateDir);
+      this.suppressClaudeBackgroundProgress();
     } catch (error) { this.db.close(); throw error; }
   }
   transaction(fn) {
@@ -40,6 +41,19 @@ class NotificationStore {
       }
       // Import on each process start: an older Bridge can still have appended
       // receipts between installing the Claude hooks and upgrading the service.
+    });
+  }
+  suppressClaudeBackgroundProgress() {
+    this.transaction(() => {
+      // Already-running Claude sessions keep their pinned Hook runtime. Enforce
+      // this policy in the shared outbox too, so their old writers become quiet
+      // without changing runtime snapshots or interrupting the CLI.
+      this.db.exec(`CREATE TRIGGER IF NOT EXISTS suppress_claude_background_progress
+        BEFORE INSERT ON notices
+        WHEN NEW.provider='claude' AND NEW.kind='background' AND NEW.status='pending'
+        BEGIN SELECT RAISE(IGNORE); END;`);
+      this.db.prepare(`UPDATE notices SET status='suppressed',payload=NULL
+        WHERE provider='claude' AND kind='background' AND status='pending'`).run();
     });
   }
   enqueue({ provider, id, kind, presentation }) {

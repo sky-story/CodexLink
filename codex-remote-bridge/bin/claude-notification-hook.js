@@ -25,7 +25,7 @@ async function main(args = process.argv.slice(2)) {
     return;
   }
   const result = recordClaudeHook(await readInput(process.stdin), { stateDir });
-  if (['disabled', 'ignored'].includes(result.status) || args.includes('--collect-only')) return;
+  if (['disabled', 'ignored', 'suppressed'].includes(result.status) || args.includes('--collect-only')) return;
   // A new hook also drains any pending events left by an earlier worker crash.
   const worker = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', __filename, '--drain', '--state-dir', stateDir], {
     detached: true, stdio: 'ignore', windowsHide: true,

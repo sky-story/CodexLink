@@ -45,14 +45,16 @@ node scripts/claude-notifications.cjs uninstall
 
 | 事件 | 提醒 | 含义 |
 | --- | --- | --- |
-| Claude `Stop` | Claude · 本轮已回复 | 主会话本轮输出结束，不宣称整个项目已完成 |
-| `Stop` 带后台任务或计划任务 | Claude · 后台仍有任务 | 已有回复，仍可能继续执行 |
+| Claude `Stop`，未报告后台任务或计划唤醒 | Claude · 本轮已回复 | 主会话本轮输出结束，不宣称整个项目已完成 |
+| `Stop` 带后台任务或计划唤醒 | 不推送 | 仍在等待任务或后续唤醒，后台进度保持静默 |
 | Claude `StopFailure` | Claude · API 错误 | 模型请求错误导致本轮结束 |
 | Claude `PermissionRequest` | Claude · 等待审批 | 请到 Mac 查看操作并审批 |
 | `AskUserQuestion` 的 `PreToolUse` | Claude · 需要补充信息 | 请到 Mac 回答问题 |
 | Codex `turn/completed` | 保持原有 Codex 文案 | 完成、失败和中断分别处理 |
 
 `SessionStart` 和 `UserPromptSubmit` 只维护本地会话/轮次身份，不发通知。子代理完成、普通工具执行完成、会话退出不会被当成主任务完成。Claude 的 `Stop` 不覆盖用户手动中断；其他 Stop Hooks 也可能让 Claude 继续执行，因此使用“本轮已回复”。旧版本若不提供后台任务字段，也不会据此声称没有后台任务。
+
+有后台任务、`/loop`、`CronCreate` 或其他计划唤醒时，不再发送“后台仍有任务”提醒。后续 `Stop` 不再报告这些活动时，正常回复提醒可以发送；审批、补充信息和 API 错误仍会单独提醒。只要计划任务仍存在，即使暂时没有后台工具执行，本轮回复也保持静默。
 
 Claude 的 `PermissionRequest` 没有稳定的 `tool_use_id`，同一轮内相同工具和参数的重复审批会合并为一次提醒。它也不覆盖所有种类的对话框，例如沙箱网络授权。本版是通知观察器，**不返回任何批准、拒绝或继续执行的决定**。
 
@@ -62,6 +64,7 @@ Claude 的 `PermissionRequest` 没有稳定的 `tool_use_id`，同一轮内相�
 
 - Hook 同步记录少量本地状态，随后启动后台发送进程；不在 Claude 的关键路径等待 Bark 网络请求。
 - Bridge 和 Claude 使用同一个 SQLite outbox。多个进程用事务领取待发送事件，来源、会话和轮次分别识别。
+- 更新后的 outbox 同时拦截旧版 Hook 写入的 Claude 后台进度，已排队但未发送的此类通知标为 `suppressed`。已打开的 Claude 窗口无需重启即可受此规则约束；不会修改已接受或结果不确定的历史回执。此规则保存在数据库中，单独切回旧运行快照不会恢复后台进度提醒。
 - 尚未开始发送的事件可在下一次 Hook 或 Bridge 的后台轮询时发送；如果两者都未运行，不会自动唤醒 Mac。
 - 发送前先持久记录 `unknown`。Bark 接受后记录 `accepted`，明确拒绝记录 `rejected`。网络超时、发送中崩溃等不确定结果不会自动重发，以免重复提醒。这不是必达消息队列。
 - 记录保留约 7 天，后续事件/启动时清理。超过期限的待发通知不再发送。

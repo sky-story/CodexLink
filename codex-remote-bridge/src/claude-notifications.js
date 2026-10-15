@@ -35,7 +35,10 @@ function recordClaudeHook(input, { stateDir, config = loadBarkConfig({ stateDir 
           || (Array.isArray(input.session_crons) && input.session_crons.length > 0);
         // Stop is a response boundary, not proof that the user's entire goal or
         // all background work succeeded. Other Stop hooks may continue the agent.
-        kind = background ? 'background' : 'response_ready';
+        // Waiting for background work or scheduled wakeups is progress, not a
+        // reason to interrupt the owner. A later idle Stop can still notify.
+        if (background) return { status: 'suppressed', kind: 'background' };
+        kind = 'response_ready';
         detail = kind;
       } else if (event === 'StopFailure') {
         kind = 'failed'; detail = 'api-error';

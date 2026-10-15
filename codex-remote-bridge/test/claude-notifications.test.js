@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const { spawn } = require('node:child_process');
+const { DatabaseSync } = require('node:sqlite');
 const { recordClaudeHook } = require('../src/claude-notifications');
 const { NotificationStore } = require('../src/notification-store');
 const { createBarkNotifications, eventNotice } = require('../src/bark-push');
@@ -77,7 +78,7 @@ test('native prompt IDs deduplicate replayed starts and separate equal prompts a
   }
   await drain(t, stateDir, sent); assert.equal(sent.length, 2);
 });
-test('background work, API errors, approvals and questions have separate accurate notices', async t => {
+test('background progress stays silent while responses, API errors, approvals and questions notify', async t => {
   const stateDir = fixture(t), sent = [];
   const record = input => recordClaudeHook(input, { stateDir });
   record(hook('UserPromptSubmit'));
@@ -89,8 +90,47 @@ test('background work, API errors, approvals and questions have separate accurat
   record(hook('Stop', { background_tasks: [], session_crons: [] }));
   record(hook('StopFailure', { error: 'rate_limit', error_details: config.deviceKey }));
   await drain(t, stateDir, sent);
-  assert.deepEqual(sent.map(p => p.title), ['Claude · 等待审批', 'Claude · 需要补充信息', 'Claude · 后台仍有任务', 'Claude · 本轮已回复', 'Claude · API 错误']);
+  assert.deepEqual(sent.map(p => p.title), ['Claude · 等待审批', 'Claude · 需要补充信息', 'Claude · 本轮已回复', 'Claude · API 错误']);
   assert(!JSON.stringify(sent).includes('PRIVATE')); assert(!sent.some(p => p.title.includes('任务已完成')));
+});
+test('background tasks and scheduled wakeups do not notify; the later idle response notifies once', async t => {
+  const stateDir = fixture(t), sent = [];
+  await collect(stateDir, hook('UserPromptSubmit'));
+  for (const fields of [
+    { background_tasks: [{ id: 'shell', status: 'running', command: 'PRIVATE COMMAND' }], session_crons: [] },
+    { background_tasks: [], session_crons: [{ id: 'cron', recurring: true, prompt: 'PRIVATE PROMPT' }] },
+    { session_crons: [{ id: 'wake-once', recurring: false }] },
+  ]) {
+    assert.deepEqual(await collect(stateDir, hook('Stop', fields)), { code: 0, stdout: '', stderr: '' });
+    await drain(t, stateDir, sent);
+    assert.equal(sent.length, 0);
+  }
+  await collect(stateDir, hook('Stop', { background_tasks: [], session_crons: [] }));
+  await collect(stateDir, hook('Stop', { background_tasks: [], session_crons: [] }));
+  await drain(t, stateDir, sent);
+  assert.deepEqual(sent.map(p => p.title), ['Claude · 本轮已回复']);
+});
+test('upgrading the outbox silences legacy background writers without stopping their CLI sessions', async t => {
+  const stateDir = fixture(t), sent = [];
+  // Keep this old-style connection and prepared insert alive across the upgrade.
+  const legacy = new DatabaseSync(path.join(stateDir, 'notification-deliveries.sqlite'));
+  t.after(() => legacy.close());
+  legacy.exec(`CREATE TABLE notices (provider TEXT NOT NULL, id TEXT NOT NULL, kind TEXT NOT NULL,
+    status TEXT NOT NULL, created_at INTEGER NOT NULL, payload TEXT, PRIMARY KEY(provider,id));`);
+  const insert = legacy.prepare('INSERT OR IGNORE INTO notices VALUES (?,?,?,?,?,?)');
+  insert.run('claude', 'a'.repeat(64), 'background', 'pending', Date.now(), JSON.stringify({ title: 'old background', body: 'PRIVATE LABEL' }));
+  insert.run('claude', 'b'.repeat(64), 'background', 'accepted', Date.now(), null);
+  insert.run('claude', 'c'.repeat(64), 'background', 'unknown', Date.now(), null);
+  const store = new NotificationStore(stateDir);
+  store.close();
+  assert.deepEqual({ ...legacy.prepare('SELECT status,payload FROM notices WHERE id=?').get('a'.repeat(64)) }, { status: 'suppressed', payload: null });
+  assert.equal(legacy.prepare('SELECT status FROM notices WHERE id=?').get('b'.repeat(64)).status, 'accepted');
+  assert.equal(legacy.prepare('SELECT status FROM notices WHERE id=?').get('c'.repeat(64)).status, 'unknown');
+  assert.equal(insert.run('claude', 'd'.repeat(64), 'background', 'pending', Date.now(), '{}').changes, 0);
+  insert.run('claude', 'e'.repeat(64), 'response_ready', 'pending', Date.now(), JSON.stringify({ title: 'Claude · 本轮已回复', body: 'response' }));
+  insert.run('codex', 'f'.repeat(64), 'completed', 'pending', Date.now(), JSON.stringify({ title: 'Codex · 任务已完成', body: 'response' }));
+  await drain(t, stateDir, sent);
+  assert.deepEqual(sent.map(p => p.title), ['Claude · 本轮已回复', 'Codex · 任务已完成']);
 });
 test('subagent/tool events and disabled observer do not notify or create state', t => {
   const stateDir = fixture(t);
