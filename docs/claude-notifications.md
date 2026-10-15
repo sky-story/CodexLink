@@ -33,6 +33,8 @@ node scripts/private-service.cjs restart
 
 会话名称仍为可选功能。开启后只发送正式会话名称或项目目录名，以及散列得到的短标识；不发送提示词、回答内容、命令、完整路径或原始会话 ID。关闭后使用通用文案。Claude 直接读取当前设置，Bridge 在重启后读取设置。
 
+需要区分图标时，用 `node scripts/bark-notifications.cjs --icon claude default` 选择官方 Claude Logo，Codex 则用 `--icon codex default` 选择 CodexLink 图标。首次升级需重新安装 Hooks 并新开 Claude 会话，旧窗口可能仍使用不支持图标的发送器。配置、网络要求和两种来源的预览命令见 [Bark 图标设置](setup.md#分别显示-codexlink-和-claude-图标)。
+
 卸载 Claude 通知 Hooks：
 
 ```sh

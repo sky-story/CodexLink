@@ -179,6 +179,8 @@ A short event status appears in the title; the **session name and an eight-chara
 
 Bark receives the device key and notification content. With labels enabled, that includes the session name or project basename and short identifier. Chat previews, commands, code, full paths, and raw thread IDs are not sent. Avoid sensitive session names. Focus modes, notification summaries, and network conditions may delay or suppress delivery.
 
+Optional source icons: run `node scripts/bark-notifications.cjs --icon codex default` for the CodexLink icon and `--icon claude default` for the official Claude logo. Restart the Bridge and update installed Claude Hooks; already-running Claude sessions may keep the old sender until reopened. See [icon setup and previews](docs/setup.md#分别显示-codexlink-和-claude-图标), including iPhone image-download requirements.
+
 ### 6. Optional: Claude Code notifications
 
 With Bark configured, add notifications for Claude Code running on the same Mac:

@@ -110,7 +110,7 @@ macOS 首次可能显示“想要控制 iTerm”的自动化授权。需要在 M
 
 Bark 作为通知接收 App 使用其自身的 APNs 能力，CodexLink 不需要新增推送 entitlement。用户已在真机锁屏确认收到测试通知。Mac Bridge 独立监听共享 daemon 的任务完成、失败、中断、等待审批和补充输入事件，手机 App 被挂起时仍可发起通知。提醒打开的是 Bark；审批仍须回到 CodexLink 查看准确内容并操作。
 
-私密配置位于 `~/.codex-remote/bark-config.json`，权限必须为 `600`，格式为 `enabled`、`serverUrl`（HTTPS 服务根地址）、`deviceKey` 和可选的 `includeSessionLabel`（默认 false）。不要把真实 Key 放入仓库、URL 日志或公开文档。配置缺失或错误只关闭 Bark，不影响会话控制。停用时把 `enabled` 改为 `false`，再执行 `node scripts/private-service.cjs restart`。
+私密配置位于 `~/.codex-remote/bark-config.json`，权限必须为 `600`，格式为 `enabled`、`serverUrl`（HTTPS 服务根地址）、`deviceKey`、可选的 `includeSessionLabel`（默认 false）和 `icons`（按 `codex` / `claude` 保存图片 HTTPS 地址，默认不设置）。不要把真实 Key 放入仓库、URL 日志或公开文档。配置缺失或错误只关闭 Bark，不影响会话控制；无效的可选图片地址只忽略对应图标。停用时把 `enabled` 改为 `false`，再执行 `node scripts/private-service.cjs restart`。
 
 ```sh
 node scripts/bark-notifications.cjs --status
@@ -122,11 +122,34 @@ node scripts/bark-notifications.cjs --send-test
 
 开启后标题显示简短状态，如 `Codex · 任务已完成`、`Codex · 等待审批`；正文为 `会话名称 · 8位短标识`，替换原来的通用操作提示，让较长的名称在正文区域显示。优先读取 daemon 的正式会话名称，没有名称时只使用 cwd 的末级目录名，再无信息则显示“未命名会话”。短标识来自完整线程 ID 的 SHA-256 前 8 位，避免 UUIDv7 相邻会话前缀相同；用于区分显示，不是安全标识。Bark group 按短标识稳定分组，重命名不改变分组。同一线程的完成、失败、中断和审批都使用此标识。
 
-名称读取限时 1.5 秒，失败时使用最近的会话元数据或短标识，仍发送通知。不使用 `preview`（通常是首条消息）或任务正文作名称。仅保留内存中的名称/目录信息，发送账本和日志不保存会话名称或通知正文。
+名称读取限时 1.5 秒，失败时使用最近的会话元数据或短标识，仍发送通知。不使用 `preview`（通常是首条消息）或任务正文作名称。启用标签时，待发送 outbox 暂存显示文案，领取发送时清除；发送日志不包含会话名称或通知正文。
 
 开启后，会话名称或项目目录名、短标识也会随通知发送给 Bark 服务，并可能显示在锁屏；完整路径、原始线程 ID、命令、对话和代码仍不发送。此链路不属于 WebSocket 的端到端加密。当前用户已明确要求区分会话，因此本机启用了此选项；新配置保持默认关闭。
 
-自动提醒范围为 Bridge 观察到的共享 daemon 会话，独立于手机是否停留在该会话。`bark-deliveries.json` 保存本地事件摘要和发送状态，发送前先落盘，避免重连/服务重启时重复推送；网络结果不确定时不自动重发，可能漏掉个别提醒。Bark 返回成功只代表服务接受请求，真实送达还受通知权限、专注模式、通知摘要和网络影响。
+自动提醒范围为 Bridge 观察到的共享 daemon 会话，独立于手机是否停留在该会话。`notification-deliveries.sqlite` 保存本地事件摘要和发送状态，并导入旧版 `bark-deliveries.json`；发送前先落盘，避免重连/服务重启时重复推送。网络结果不确定时不自动重发，可能漏掉个别提醒。Bark 返回成功只代表服务接受请求，真实送达还受通知权限、专注模式、通知摘要和网络影响。
+
+### 分别显示 CodexLink 和 Claude 图标
+
+```sh
+node scripts/bark-notifications.cjs --icon codex default
+node scripts/bark-notifications.cjs --icon claude default
+node scripts/claude-notifications.cjs install # 已使用 Claude 通知时更新 Hooks
+node scripts/private-service.cjs restart
+node scripts/bark-notifications.cjs --status
+```
+
+`default` 为 Codex 选择项目原有的紫蓝色 CodexLink 图标，为 Claude 选择 [Anthropic 官方 App Store](https://apps.apple.com/us/app/claude-by-anthropic/id6473753684) 的 Logo。CodexLink 图片经 jsDelivr 从固定的公开 Git 提交读取；Claude 图片来自 Apple 图片 CDN。图片地址不会包含会话 ID 或设备 Key。图标按事件来源选择，不受哪一个后台进程负责发送影响。
+
+也可以把 `default` 换成自己托管的 HTTPS 图片地址，或用 `--icon codex off` / `--icon claude off` 恢复对应来源的 Bark 默认图标。命令保留接收设备、会话标签和其他来源的配置；修改后重启 Bridge。首次升级需更新 Claude Hooks，新开会话后加载新版发送器，已运行的旧版窗口仍可能显示 Bark 默认图标，不会自动终止它们。
+
+[Bark 自定义图标](https://github.com/Finb/Bark/blob/master/docs/params.md#icon) 需要 iOS 15 及以上。图片由 iPhone 下载并按 URL 缓存，首次下载超过 10 秒会退回默认图标。手机仅启用 Tailscale 时仍需能访问所选图片域名；Mac 下载成功不能代替手机网络验证。更换同一地址的图片不会立即清除 Bark 缓存，应使用新 URL。此功能改变通知显示图标，通知接收 App 仍是 Bark。
+
+需要向真实手机预览时，分别运行以下命令；它们只发送通用测试文字，不启动模型任务：
+
+```sh
+node scripts/bark-notifications.cjs --send-test codex
+node scripts/bark-notifications.cjs --send-test claude
+```
 
 
 ## 会话模型与思考强度

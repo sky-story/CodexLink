@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { loadBarkConfig, sendBark, eventNotice, createBarkNotifications } = require('../src/bark-push');
+const { loadBarkConfig, sendBark, eventNotice, createBarkNotifications, DEFAULT_BARK_ICONS } = require('../src/bark-push');
 const config = { enabled: true, reason: 'configured', endpoint: 'https://example.test/push', deviceKey: 'fixtureKeyOnly123' };
 const completed = { method: 'turn/completed', params: { threadId: 'private-thread', turn: { id: 'turn1', status: 'completed', items: [{ text: 'PRIVATE CODE' }] } } };
 function fixture(t) { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bark-test-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true })); return dir; }
@@ -141,4 +141,73 @@ test('labels remain opt-in; disabling skips metadata lookup and sends original g
     fetchImpl: async (_, options) => { sent.push(JSON.parse(options.body)); return accepted(); } });
   await notifier.handleOutbound(completed);
   assert.equal(lookups, 0); assert.equal(sent[0].title, 'CodexLink'); assert.equal(sent[0].group, 'Codex Remote');
+});
+
+test('optional icons validate independently; bad artwork never disables Bark or changes its receiver', t => {
+  const stateDir = fixture(t), file = path.join(stateDir, 'bark-config.json');
+  for (const invalid of [null, 42, {}, 'file:///private/icon.png', 'http://example.test/icon.png',
+    'https://user:secret@example.test/icon.png', 'https://example.test/icon.png#fragment', 'https://example.test/\nicon.png']) {
+    fs.writeFileSync(file, JSON.stringify({ enabled: true, serverUrl: 'https://example.test', deviceKey: config.deviceKey,
+      icons: { codex: invalid, claude: DEFAULT_BARK_ICONS.claude, unknown: 'https://example.test/unknown.png' } }), { mode: 0o600 });
+    const loaded = loadBarkConfig({ stateDir });
+    assert.equal(loaded.enabled, true); assert.equal(loaded.deviceKey, config.deviceKey);
+    assert.deepEqual(loaded.icons, { claude: DEFAULT_BARK_ICONS.claude });
+  }
+});
+
+test('one shared dispatcher uses each queued provider icon, including legacy rows and disabled labels', async t => {
+  const { NotificationStore } = require('../src/notification-store');
+  for (const includeSessionLabel of [true, false]) {
+    const stateDir = fixture(t), sent = [], store = new NotificationStore(stateDir);
+    // Rows created before icons existed still receive the current icon at send time.
+    for (const [provider, id, kind] of [['codex', 'a', 'completed'], ['claude', 'b', 'response_ready']]) {
+      store.enqueue({ provider, id: id.repeat(64), kind, presentation: { title: provider, body: 'safe label', group: provider, icon: 'https://example.test/stale.png' } });
+    }
+    store.close();
+    const notifier = createBarkNotifications({ stateDir, config: { ...config, includeSessionLabel, icons: DEFAULT_BARK_ICONS }, report: () => {},
+      fetchImpl: async (_, options) => { sent.push(JSON.parse(options.body)); return accepted(); } });
+    await notifier.drain(); await notifier.close();
+    assert.equal(sent.length, 2);
+    assert.deepEqual(sent.map(p => p.icon).sort(), Object.values(DEFAULT_BARK_ICONS).sort());
+    for (const payload of sent) {
+      assert.equal(payload.icon, payload.group.toLowerCase().startsWith('claude') ? DEFAULT_BARK_ICONS.claude : DEFAULT_BARK_ICONS.codex);
+    }
+  }
+});
+
+test('explicit source tests use matching titles/icons; missing or removed icons omit the field', async () => {
+  const sent = [], fetchImpl = async (_, options) => { sent.push(JSON.parse(options.body)); return accepted(); };
+  for (const provider of ['codex', 'claude']) {
+    await sendBark({ ...config, icons: DEFAULT_BARK_ICONS }, 'test', { provider, fetchImpl });
+    assert.equal(sent.at(-1).icon, DEFAULT_BARK_ICONS[provider]);
+    assert.equal(sent.at(-1).title, `${provider === 'codex' ? 'Codex' : 'Claude'} · 通知测试`);
+    for (const icons of [undefined, {}, { [provider]: 'file:///secret' }]) {
+      await sendBark({ ...config, icons }, 'test', { provider, fetchImpl });
+      assert.equal(Object.hasOwn(sent.at(-1), 'icon'), false);
+    }
+  }
+});
+
+test('icon CLI preserves keys, labels and the other icon; status and failures redact private values', t => {
+  const { spawnSync } = require('node:child_process');
+  const stateDir = fixture(t), file = path.join(stateDir, 'bark-config.json');
+  const original = { enabled: true, serverUrl: 'https://example.test', deviceKey: config.deviceKey, includeSessionLabel: true, futureSetting: 'retained' };
+  fs.writeFileSync(file, JSON.stringify(original), { mode: 0o600 });
+  const run = (...args) => spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', path.resolve(__dirname, '../../scripts/bark-notifications.cjs'), ...args], {
+    env: { ...process.env, CODEX_REMOTE_DEVICE_STATE_DIR: stateDir }, encoding: 'utf8', timeout: 5000,
+  });
+  for (const provider of ['codex', 'claude']) assert.equal(run('--icon', provider, 'default').status, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { ...original, icons: DEFAULT_BARK_ICONS });
+  const custom = 'https://example.test/private-image.png?token=PRIVATE_TOKEN';
+  const update = run('--icon', 'codex', custom);
+  assert.equal(update.status, 0); assert(!update.stdout.includes(custom));
+  const status = run('--status');
+  assert.deepEqual(JSON.parse(status.stdout).icons, { codex: true, claude: true });
+  assert(!status.stdout.includes('PRIVATE')); assert(!status.stdout.includes(config.deviceKey));
+  const before = fs.readFileSync(file, 'utf8');
+  const bad = run('--icon', 'codex', 'https://user:PRIVATE_SECRET@example.test/a.png');
+  assert.equal(bad.status, 1); assert(!bad.stderr.includes('PRIVATE')); assert.equal(fs.readFileSync(file, 'utf8'), before);
+  assert.equal(run('--icon', 'claude', 'off').status, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { ...original, icons: { codex: custom } });
+  assert.equal(fs.statSync(file).mode & 0o077, 0);
 });

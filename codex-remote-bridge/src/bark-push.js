@@ -5,6 +5,12 @@ const { createHash } = require('node:crypto');
 const { resolveCodexRemoteStateDir } = require('./daemon-state');
 const { NotificationStore } = require('./notification-store');
 const { codexNotice } = require('./notification-events');
+// Public artwork only. Pin CodexLink to a published revision; Claude uses the
+// artwork URL from Anthropic's official App Store listing. Bark caches by URL.
+const DEFAULT_BARK_ICONS = Object.freeze({
+  codex: 'https://cdn.jsdelivr.net/gh/sky-story/CodexLink@dfc98b63cfde02d7071f54e5f48c886f8d6db4c9/CodexMobile/CodexMobile/Assets.xcassets/AppLogo.imageset/CodexRemote-iOS-Default-1024x1024.png',
+  claude: 'https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/51/61/43/51614377-8976-4277-5f5e-90c614b04913/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg',
+});
 const BODIES = Object.freeze({
   completed: 'Codex 任务已完成，请打开 CodexLink 查看。',
   failed: 'Codex 任务执行失败，请打开 CodexLink 查看。',
@@ -22,6 +28,7 @@ const TITLES = Object.freeze({
   test: 'Codex · 通知测试',
 });
 const CLAUDE_BODIES = Object.freeze({
+  test: 'Claude 锁屏通知测试。请检查通知图标是否显示 Claude Logo。',
   response_ready: 'Claude 本轮已回复，请在 Mac 查看。',
   background: 'Claude 本轮已回复，仍有后台任务或计划任务，请在 Mac 查看。',
   failed: 'Claude 遇到 API 错误，请在 Mac 查看。',
@@ -29,9 +36,18 @@ const CLAUDE_BODIES = Object.freeze({
   input: 'Claude 需要你的补充信息，请在 Mac 查看。',
 });
 const CLAUDE_TITLES = Object.freeze({
+  test: 'Claude · 通知测试',
   response_ready: 'Claude · 本轮已回复', background: 'Claude · 后台仍有任务',
   failed: 'Claude · API 错误', approval: 'Claude · 等待审批', input: 'Claude · 需要补充信息',
 });
+function normalizeIconURL(value) {
+  if (typeof value !== 'string' || value.length > 2048 || /[\s\x00-\x1f\x7f]/.test(value)) return undefined;
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'https:' && !url.username && !url.password && !url.hash) return url.href;
+  } catch { /* Invalid optional artwork must not disable notifications. */ }
+  return undefined;
+}
 function loadBarkConfig({ stateDir = resolveCodexRemoteStateDir() } = {}) {
   const file = path.join(stateDir, 'bark-config.json');
   try {
@@ -44,7 +60,13 @@ function loadBarkConfig({ stateDir = resolveCodexRemoteStateDir() } = {}) {
       || url.pathname !== '/' || !/^[A-Za-z0-9_-]{8,200}$/.test(config.deviceKey || '')) {
       return { enabled: false, reason: 'invalid_config' };
     }
-    return { enabled: true, reason: 'configured', endpoint: `${url.origin}/push`, deviceKey: config.deviceKey, includeSessionLabel: config.includeSessionLabel === true };
+    const icons = {};
+    for (const provider of ['codex', 'claude']) {
+      const icon = normalizeIconURL(config.icons?.[provider]);
+      if (icon) icons[provider] = icon;
+    }
+    return { enabled: true, reason: 'configured', endpoint: `${url.origin}/push`, deviceKey: config.deviceKey,
+      includeSessionLabel: config.includeSessionLabel === true, icons };
   } catch { return { enabled: false, reason: 'invalid_config' }; }
 }
 function cleanLabel(value) {
@@ -66,17 +88,20 @@ function notificationPresentation(config, kind, { provider = 'codex', session } 
   const titles = provider === 'claude' ? CLAUDE_TITLES : TITLES;
   if (!Object.hasOwn(bodies, kind)) throw new Error('通知类型无效。');
   const label = config.includeSessionLabel ? sessionPresentation(session, provider) : null;
-  return { title: label || provider === 'claude' ? titles[kind] : 'CodexLink',
+  return { title: kind === 'test' || label || provider === 'claude' ? titles[kind] : 'CodexLink',
     body: label?.body || bodies[kind], group: label?.group || (provider === 'claude' ? 'Claude' : 'Codex Remote') };
 }
 async function sendBark(config, kind, { fetchImpl = fetch, session, provider = 'codex', presentation } = {}) {
   if (!config.enabled) throw new Error('Bark 未配置。');
   const display = presentation || notificationPresentation(config, kind, { provider, session });
+  // Select by the queued event's provider, not the process draining the shared
+  // outbox or a stored presentation. This also applies updated icons to old rows.
+  const icon = normalizeIconURL(config.icons?.[provider]);
   try {
     const response = await fetchImpl(config.endpoint, {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(8000),
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ device_key: config.deviceKey, title: display.title, body: display.body, group: display.group, isArchive: '0' }),
+      body: JSON.stringify({ device_key: config.deviceKey, title: display.title, body: display.body, group: display.group, isArchive: '0', ...(icon ? { icon } : {}) }),
     });
     if (!response.ok) return { status: 'rejected', httpStatus: response.status };
     const body = await response.json();
@@ -161,4 +186,4 @@ function createBarkNotifications({ stateDir = resolveCodexRemoteStateDir(), conf
   async function close() { clearInterval(timer); await draining; store?.close(); }
   return { handleOutbound, drain, start, close };
 }
-module.exports = { loadBarkConfig, sendBark, eventNotice, createBarkNotifications, sessionPresentation, notificationPresentation, cleanLabel };
+module.exports = { loadBarkConfig, sendBark, eventNotice, createBarkNotifications, sessionPresentation, notificationPresentation, cleanLabel, normalizeIconURL, DEFAULT_BARK_ICONS };

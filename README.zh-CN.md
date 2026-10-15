@@ -185,6 +185,8 @@ Bark 公共服务会收到设备 Key 和通知内容；开启会话标识后，�
 
 完成 Bark 配置后运行 `node scripts/claude-notifications.cjs install`，再新开 Claude 会话。安装器保留现有 Claude 设置和权限 Hooks。更新 Mac 服务后，Codex 与 Claude 的通知共用持久发送记录并分别标明来源。通知可独立使用；安装、卸载和限制见 [Claude 通知说明](docs/claude-notifications.md)。
 
+可选图标：`node scripts/bark-notifications.cjs --icon codex default` 使用 CodexLink 图标，`--icon claude default` 使用官方 Claude Logo。修改后重启 Bridge；首次升级还需更新 Claude Hooks 并新开会话，旧窗口可能仍使用旧发送器。图片由手机下载并缓存，配置和预览方法见 [通知图标设置](docs/setup.md#分别显示-codexlink-和-claude-图标)。
+
 ### 7. 可选：在同一个 App 中操作 Claude
 
 完成上面的 App、Bridge 和配对设置；如需锁屏提醒，也完成第 6 步。官方账号沿用 Mac 上 Claude Code 的登录，无需另外配置 API Key。
