@@ -54,7 +54,7 @@ function phoneRouter(mode = 'shared') {
     Buffer, URL,
   }, { filename });
   module.exports.startBridge({ printPairingQr: false, config: { codexEndpoint: 'unix:///tmp/fixture.sock', relayUrl: 'ws://127.0.0.1:0/relay' } });
-  return { replies, forwarded, initialize(id) { sockets[0].emit('message', JSON.stringify({ id, method: 'initialize', params: { clientInfo: { name: 'codexmobile_ios', version: '1.3.8' } } })); } };
+  return { replies, forwarded, request(message) { sockets[0].emit('message', JSON.stringify(message)); }, initialize(id) { sockets[0].emit('message', JSON.stringify({ id, method: 'initialize', params: { clientInfo: { name: 'codexmobile_ios', version: '1.3.8' } } })); } };
 }
 
 test('phone initialize and reconnect advertise shared settings through the outer Bridge', () => {
@@ -63,6 +63,7 @@ test('phone initialize and reconnect advertise shared settings through the outer
     router.initialize(id);
     const response = router.replies.find(r => r.id === id);
     assert.equal(response?.result?.sessionSettings, true);
+    assert.equal(response.result.claudeChannels, true);
     assert.equal(response.result.turnStateSnapshot, true);
     assert.equal(response.result.sharedSession, true);
     assert.equal(response.result.macTerminalOpen, true);
@@ -75,4 +76,13 @@ test('non-shared transport never advertises shared settings', () => {
   router.initialize('legacy');
   assert.notEqual(router.replies[0]?.result?.sessionSettings, true);
   assert.notEqual(router.replies[0]?.result?.turnStateSnapshot, true);
+});
+
+test('phone Claude requests use their own handler and never reach the Codex transport', () => {
+  const router = phoneRouter();
+  router.request({ id: 'claude-list', method: 'claude/sessions' });
+  assert(Array.isArray(router.replies.find(r => r.id === 'claude-list').result.data));
+  router.request({ id: 'wrong-control', method: 'claude/interrupt', params: {} });
+  assert.equal(router.replies.find(r => r.id === 'wrong-control').error.code, -32601);
+  assert.equal(router.forwarded.length, 0);
 });

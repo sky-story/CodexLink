@@ -327,6 +327,7 @@ final class CodexService {
     var sharedSettingsRevision: [String: Int] = [:]
     var sharedSettingsError: [String: String] = [:]
     var supportsSharedSessionControl = false
+    var supportsClaudeChannels = false
     var sharedControlStatus: [String: String] = [:]
     var sharedQueueText: [String: [String]] = [:]
     var isInitialized = false

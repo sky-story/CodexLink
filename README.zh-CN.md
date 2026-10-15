@@ -4,7 +4,9 @@
 
 在 iPhone 上查看和控制 Mac 原生 Codex CLI **正在执行的同一个会话**。Mac 负责模型与工具执行，手机提供实时输出、Steer、持久 Queue、Stop 和远程审批。
 
-**当前状态：Alpha / 开发者预览。** 适合愿意自行编译、排查问题的个人用户；还不是稳定发行版。本项目基于 [RealDyllon/codex-remote](https://github.com/RealDyllon/codex-remote/tree/9a737fb) 修改，沿用 ISC 许可证，不是 OpenAI 官方客户端。
+**可选的 Claude Code 扩展**可在同一个 App 中查看接入后的文字、给 Mac 上同一个 Claude 会话发消息，并通过 Bark 接收锁屏提醒。使用 Mac 已登录的官方账号即可；真机消息收发和自动回复提醒已验证，手机工具审批仍待验收。
+
+**当前状态：Alpha / 开发者预览。** 适合愿意自行编译、排查问题的个人用户；还不是稳定发行版。本项目基于 [RealDyllon/codex-remote](https://github.com/RealDyllon/codex-remote/tree/9a737fb) 修改，沿用 ISC 许可证，不是 OpenAI 或 Anthropic 官方客户端。
 
 ## 看看界面
 
@@ -25,12 +27,14 @@
 | 查看 Mac CLI 实时输出 | 实体 iPhone 通过，包括 Tailscale 蜂窝网络 |
 | Steer：执行中补充要求 | 真机验证作用于原 Turn，没有另起任务 |
 | Queue：当前任务后执行 | 真机空闲、忙时排队通过；队列由 Mac daemon 持久管理 |
-| 会话模型与思考强度 | 显示和修改 Mac 会话配置；真实 daemon 隔离实验通过，手机菜单交互待验收 |
+| Codex 会话模型与思考强度 | 真实 daemon 隔离实验通过；用户已确认手机模型菜单可打开，手机修改后的任务配置仍待验收 |
 | 远程审批 | 真机单次批准通过；拒绝、双端竞争与待审批重连仍待验收 |
 | Stop | 真机确认原 Turn 中断；**可能保留已后台化的工具进程** |
 | Mac 继续操作 | 手机控制后，原 Mac TUI 可继续输入 |
 | 自动重连 | 一次 Wi-Fi → 蜂窝切换、一次 Bridge 崩溃恢复通过；非全部故障场景 |
 | Bark 锁屏提醒 | 真机确认测试通知送达；后台任务完成自动发送通过，审批提醒真机待验收 |
+| Claude + Codex 通知 | Claude 真实回复后的自动提醒已确认锁屏送达；双 CLI 同时完成及审批提醒待验收，见[安装说明](docs/claude-notifications.md) |
+| Claude 会话和工具审批 | 已接入官方 Channels 预览协议；真机消息与同一 Mac 会话回复已验证，审批转发在 Mac 实测通过，手机审批待验收 |
 | 在 Mac 打开此会话（iTerm） | 已实现，受 macOS 自动化授权影响，完整真机链路待验收 |
 
 公开验证摘要和已知问题见 [验证记录](docs/validation.md)，发布定位见 [发布准备](docs/release-readiness.md)。
@@ -42,17 +46,20 @@ Mac 原生 Codex TUI ──┐
                     ├── 同一个 Codex daemon / 同一个 Unix socket
 Mac Bridge ─────────┘
     │
+    ├── 本地 Channel / Hooks ⇄ Claude Code（可选）
     └── 私网 Relay ⇄ Tailscale ⇄ iPhone SwiftUI App
                   （配对后的消息端到端加密）
 
-Mac Bridge ── 可选：事件提醒 / 会话标识 → Bark → iPhone 锁屏
+Codex 事件 / Claude Hooks ── 可选：事件提醒 / 会话标识 → Bark → iPhone 锁屏
 ```
 
 这里的 Turn 是一次任务执行：从用户发出任务到完成、失败或中断。Queue 通常产生后续 Turn；Steer 修改当前 Turn 的输入。
 
-输入框上方显示会话的模型和思考强度，选项来自 Mac 返回的模型列表。修改用于后续任务及待执行的 Queue，不会切换当前正在执行的 Turn。配置由同一个 daemon 确认，保留原审批与沙箱策略；重连会刷新实际配置，结果不确定时不会自动重发。使用选择菜单需同时更新手机 App 与 Mac Bridge。
+Codex 输入框上方显示会话的模型和思考强度，选项来自 Mac 返回的模型列表。修改用于后续任务及待执行的 Queue，不会切换当前正在执行的 Turn。配置由同一个 daemon 确认，保留原审批与沙箱策略；重连会刷新实际配置，结果不确定时不会自动重发。使用选择菜单需同时更新手机 App 与 Mac Bridge。
 
-本项目要求 CLI 和 Bridge 连接**同一个共享 daemon**。恢复历史记录、另起独立 App Server 或另一个 Codex 执行实例，不等于共享正在运行的任务。`--no-daemon` 会话不支持；部分 CLI `-c` 覆盖也可能切换到内嵌运行时。
+Codex 功能要求 CLI 和 Bridge 连接**同一个共享 daemon**。恢复历史记录、另起独立 App Server 或另一个 Codex 执行实例，不等于共享正在运行的任务。`--no-daemon` 会话不支持；部分 CLI `-c` 覆盖也可能切换到内嵌运行时。Claude 扩展使用官方 Channels 预览协议，需在启动 Claude 时接入。
+
+手机与 Mac 无需在同一 Wi-Fi，也无需选择 Tailscale 出口节点。模型请求仍由 Mac 使用自己的账号和网络发出；手机无需安装 Claude App 或另外登录模型账号。
 
 ## 安装前准备
 
@@ -60,6 +67,7 @@ Mac Bridge ── 可选：事件提醒 / 会话标识 → Bark → iPhone 锁�
 | --- | --- |
 | Mac | 可运行 Xcode、Codex CLI 和 Tailscale；后台服务使用 macOS launchd |
 | Codex | 已安装、已在 Mac 登录；当前验证基线为 **CLI 与 daemon 0.162.1** |
+| Claude Code（可选） | 已在 Mac 安装并登录；当前实测 **2.1.300 + 官方 Pro 账号**，Channels 可用性受账号或组织策略限制 |
 | Node.js | **推荐 Node 24**；Bridge 使用 `node:sqlite`，最低 22.13 |
 | Xcode | 当前使用 **Xcode 26.5** 验证；其他版本未承诺兼容 |
 | iPhone | App 最低 iOS 18.6；真机验证设备为 iPhone 16 Pro / iOS 18.7.8 |
@@ -173,6 +181,53 @@ node scripts/private-service.cjs restart
 
 Bark 公共服务会收到设备 Key 和通知内容；开启会话标识后，还会收到会话名称（或项目目录名）与短标识。正文仅包含会话标识，不发送对话、命令、代码、完整路径或原始线程 ID。请避免给会话取包含敏感信息的名称。提醒可能受专注模式、通知摘要或网络影响，不是必达消息队列。
 
+### 6. 可选：同时接收 Claude Code 通知
+
+完成 Bark 配置后运行 `node scripts/claude-notifications.cjs install`，再新开 Claude 会话。安装器保留现有 Claude 设置和权限 Hooks。更新 Mac 服务后，Codex 与 Claude 的通知共用持久发送记录并分别标明来源。通知可独立使用；安装、卸载和限制见 [Claude 通知说明](docs/claude-notifications.md)。
+
+### 7. 可选：在同一个 App 中操作 Claude
+
+完成上面的 App、Bridge 和配对设置；如需锁屏提醒，也完成第 6 步。官方账号沿用 Mac 上 Claude Code 的登录，无需另外配置 API Key。
+
+在本仓库根目录设置一次短命令：
+
+```sh
+chmod +x scripts/claude-session.cjs
+mkdir -p "$HOME/.local/bin"
+ln -s "$PWD/scripts/claude-session.cjs" "$HOME/.local/bin/clink"
+```
+
+确保 `~/.local/bin` 位于终端的 `PATH` 中；已有同名命令时请换一个名称。移动仓库后需要更新链接。具体设置见[短命令说明](docs/claude-sessions.md#可选使用短命令-clink)。
+
+以后在你要工作的项目目录运行：
+
+```sh
+cd /path/to/your/project
+clink                           # 新会话，默认以当前目录名命名
+```
+
+按 Claude 提示确认本地开发通道 **I am using this for local development**，完成项目/MCP 初始授权并保持终端打开。手机侧栏进入 **Claude 会话**，即可发送消息并查看回复。多个项目可分别开终端运行。
+
+其他常用方式：
+
+```sh
+clink --name "我的项目"           # 新会话，自定义名称
+clink --resume "完整的会话UUID"   # 在原项目目录恢复对话；先等原任务结束并退出原 CLI
+clink --help
+```
+
+没有设置短命令时，也可运行 `node /path/to/CodexLink/scripts/claude-session.cjs`。
+
+Claude 扩展的使用范围：
+
+- **消息与通知**：手机消息进入 Mac 上同一个会话；本轮回复结束后可由 Bark 提醒。已接入的真机收发和普通 Claude 会话的自动锁屏提醒均已验证；提醒不表示所有后台任务都完成。
+- **已有窗口**：普通 `claude` 启动的会话不会自动出现在手机列表。当前没有自动发现或运行中挂接；已加载通知 Hooks 的普通会话仍可独立发送提醒。
+- **关闭与恢复**：退出手机页面不终止 Mac 工作；退出 Mac CLI 后会话离线，历史仍保留。退出前可用 `/status` 查看 Session ID，再通过 `--resume` 恢复。不带 `--resume` 就新建会话。手机查看记录仍需连接 Mac 后台，暂不支持从手机启动已结束的会话或完整离线缓存。
+- **模型与控制**：Claude 模型需在 Mac 用 `/model` 切换；手机暂不支持模型选择、Stop 或交互问答。一次性工具审批已实现，Mac 转发链路通过，手机审批及竞争/断线场景仍待验收。
+- **上下文与配置**：通道会增加工具说明和回复工具调用的 token；本地同步本身不调用模型。只同步接入后的文字和最终回复，不导入旧 transcript 或提供完整工具日志。启动器仅接受 `--name`、`--resume`，原启动命令额外指定的模型、权限模式或提示词参数需另行核对。
+
+Channels 属于官方研究预览。完整设置、数据存储和限制见 [Claude 会话接入](docs/claude-sessions.md)。
+
 ## 日常使用与更新
 
 ```sh
@@ -209,7 +264,7 @@ xcodebuild -jobs 2 -project CodexMobile/CodexMobile.xcodeproj \
   -derivedDataPath .build/ios CODE_SIGNING_ALLOWED=NO build
 ```
 
-Bridge 单元测试使用临时状态和模拟 Keychain。不要把真实配对目录传给测试。真机验收原始记录、实验脚本和旧截图仅保留在维护者本机，不随源码公开。真实模型实验必须使用隔离工作区，会产生正常 Codex 用量。
+Bridge 单元测试使用临时状态和模拟 Keychain。不要把真实配对目录传给测试。真机验收原始记录、实验脚本和旧截图仅保留在维护者本机，不随源码公开。真实模型实验必须使用隔离工作区，会产生相应账号用量。
 
 复杂断网、强制关闭 App、睡眠唤醒、daemon 崩溃、双端审批竞争和长期运行仍待扩大验收。上游保留的图片、语音、Git、MCP 等界面不代表共享模式已支持全部功能。
 
@@ -217,6 +272,6 @@ Bridge 单元测试使用临时状态和模拟 Keychain。不要把真实配对�
 
 保留上游 ISC 版权及所有依赖许可，见 [LICENSE](LICENSE)、[第三方声明](THIRD_PARTY_NOTICES.md) 和 [技术来源](docs/research.md)。
 
-Codex 登录凭据留在 Mac。配对二维码、设备私钥、Bark Key、APNs 密钥与本地日志不要公开上传。提交 Issue 时请先移除对话、用户名、路径、设备标识及任何凭据。当前没有自动上传诊断信息的功能。
+Codex 和 Claude 登录凭据留在 Mac。配对二维码、设备私钥、Bark Key、APNs 密钥与本地日志不要公开上传。提交 Issue 时请先移除对话、用户名、路径、设备标识及任何凭据。当前没有自动上传诊断信息的功能。
 
 本分支的隐私说明见 [隐私](docs/privacy.md)，支持与问题反馈请使用 [GitHub Issues](https://github.com/sky-story/CodexLink/issues)。App 显示名称为 CodexLink；源码目录和技术标识保留原名以维持兼容，共享模式能力以本 README 为准。

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C1A0DE01C1A0DE01C1A0DE01 /* ClaudeChannelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A0DE02C1A0DE02C1A0DE02 /* ClaudeChannelTests.swift */; };
 		0FF319C127462AB7090926EE /* CodexApprovalStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A04B8C4BBA28B0262C0C849D /* CodexApprovalStateTests.swift */; };
 		11A2B3C4D5E6F708192A3B4C /* TurnFileAutocompleteTokenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11A2B3C4D5E6F708192A3B4D /* TurnFileAutocompleteTokenTests.swift */; };
 		1A6B983C45576D23F47FEAD6 /* BundledMermaidTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D681079AD79AF33D4FF913A8 /* BundledMermaidTests.swift */; };
@@ -68,6 +69,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		C1A0DE02C1A0DE02C1A0DE02 /* ClaudeChannelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeChannelTests.swift; sourceTree = "<group>"; };
 		01AB61809BB9F134977E8935 /* CodexApprovalResponsePayloadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexApprovalResponsePayloadTests.swift; sourceTree = "<group>"; };
 		02C96CD0916A43F38184398D /* AssistantTurnEndActionVisibilityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AssistantTurnEndActionVisibilityTests.swift; sourceTree = "<group>"; };
 		11A2B3C4D5E6F708192A3B4D /* TurnFileAutocompleteTokenTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TurnFileAutocompleteTokenTests.swift; sourceTree = "<group>"; };
@@ -189,6 +191,7 @@
 				D17917F8F42125F838377DC5 /* CodexServiceCatchupRecoveryTests.swift */,
 				A04B8C4BBA28B0262C0C849D /* CodexApprovalStateTests.swift */,
 				01AB61809BB9F134977E8935 /* CodexApprovalResponsePayloadTests.swift */,
+				C1A0DE02C1A0DE02C1A0DE02 /* ClaudeChannelTests.swift */,
 				D681079AD79AF33D4FF913A8 /* BundledMermaidTests.swift */,
 				B3C4D5E6F708192A3B4C5D6F /* CodexPlanModeTests.swift */,
 				4EEB36EBEA2A475AC9B30B1F /* TurnTimelineReducerTests.swift */,
@@ -500,6 +503,7 @@
 				BA883BB9AC82E706CACE4FB4 /* CodexServiceCatchupRecoveryTests.swift in Sources */,
 				0FF319C127462AB7090926EE /* CodexApprovalStateTests.swift in Sources */,
 				A69931891FBC88ACC8AB71F1 /* CodexApprovalResponsePayloadTests.swift in Sources */,
+				C1A0DE01C1A0DE01C1A0DE01 /* ClaudeChannelTests.swift in Sources */,
 				1A6B983C45576D23F47FEAD6 /* BundledMermaidTests.swift in Sources */,
 				B3C4D5E6F708192A3B4C5D6E /* CodexPlanModeTests.swift in Sources */,
 				4CCE0926DAD312571934343A /* TurnTimelineReducerTests.swift in Sources */,

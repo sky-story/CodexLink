@@ -18,6 +18,7 @@ struct SidebarView: View {
 
     let onClose: () -> Void
     let onOpenThread: (CodexThread) -> Void
+    var onOpenClaude: (() -> Void)? = nil
 
     @State private var searchText = ""
     @State private var isCreatingThread = false
@@ -41,6 +42,20 @@ struct SidebarView: View {
                 showsCloseButton: showsInlineCloseButton,
                 onClose: onClose
             )
+
+            if let onOpenClaude {
+                Button(action: onOpenClaude) {
+                    HStack {
+                        Label("Claude 会话", systemImage: "terminal")
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption)
+                    }.padding(12)
+                }
+                .buttonStyle(.plain)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+            }
 
             SidebarSearchField(text: $searchText, isActive: $isSearchActive)
                 .padding(.horizontal, 16)

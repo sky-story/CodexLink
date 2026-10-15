@@ -8,6 +8,8 @@
 | --- | --- | --- |
 | ws 8.x，精确版本以 package-lock.json 为准 | MIT | ThirdPartyLicenses/ws-MIT.txt |
 | qrcode-terminal 0.12 | Apache-2.0 与内嵌 QRCode MIT 声明 | ThirdPartyLicenses/qrcode-terminal-Apache-MIT.txt |
+| @modelcontextprotocol/sdk 1.32.1（Mac Bridge） | MIT | ThirdPartyLicenses/mcp-sdk-MIT.txt |
+| zod 3.25.76（Mac Bridge） | MIT | ThirdPartyLicenses/zod-MIT.txt |
 | Textual 0.3.1 | MIT | ThirdPartyLicenses/textual-MIT.txt |
 | swift-concurrency-extras 1.3.2 | MIT | ThirdPartyLicenses/swift-concurrency-extras-MIT.txt |
 | swiftui-math 0.1.0 与 MathChat 衍生内容 | MIT | ThirdPartyLicenses/swiftui-math-MIT.txt、swiftui-math-fonts-LICENSE.txt |
@@ -16,7 +18,7 @@
 | JetBrains Mono | SIL OFL 1.1 | ThirdPartyLicenses/jetbrainsmono-OFL.txt |
 | Mermaid 11.17.2 与实际捆绑的 64 个包 | MIT、ISC、BSD、Apache 等；DOMPurify 选用 Apache-2.0 | ThirdPartyLicenses/mermaid-bundle.txt；精确组件见 tools/mermaid/manifest.json |
 
-Mermaid 的上游资源缺少可复现版本记录，已替换为固定 npm 依赖构建的离线资源。运行 `npm --prefix tools/mermaid ci --ignore-scripts` 和 `npm --prefix tools/mermaid run build` 可重建资源、内容哈希与依赖声明。KaTeX 固定为 0.18.2，修复审计报告的问题。所有许可合并进 App 的 `Resources/ThirdPartyNotices.txt`。
+Mermaid 的上游资源缺少可复现版本记录，已替换为固定 npm 依赖构建的离线资源。运行 `npm --prefix tools/mermaid ci --ignore-scripts` 和 `npm --prefix tools/mermaid run build` 可重建资源、内容哈希与依赖声明。KaTeX 固定为 0.18.2，修复审计报告的问题。App 内使用组件的许可合并进 `Resources/ThirdPartyNotices.txt`。Mac Bridge 的依赖和递归依赖以 `package-lock.json` 为准，运行快照保留 `node_modules` 内的原始许可文件；MCP SDK 和 Zod 不捆绑到 iPhone App 中。
 
 字体许可来自 Google Fonts 中对应官方字体目录，保留未修改字体与版权声明。Sentry 已从工程依赖及运行入口移除。Codex 本身为外部本机安装的程序，本仓库未分发 Codex 二进制或复制其 Rust 源码；对应 Apache-2.0/NOTICE 可在隔离的官方参考仓库查阅。
 

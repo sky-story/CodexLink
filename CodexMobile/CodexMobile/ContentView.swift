@@ -345,6 +345,9 @@ struct ContentView: View {
                         onClose: { closeSidebar() },
                         onOpenThread: { thread in
                             openThreadFromSidebar(thread)
+                        },
+                        onOpenClaude: {
+                            navigationPath.append("claude")
                         }
                     )
                     .frame(width: currentSidebarWidth)
@@ -385,6 +388,9 @@ struct ContentView: View {
                 .navigationDestination(for: String.self) { destination in
                     if destination == "settings" {
                         SettingsView()
+                            .adaptiveNavigationBar()
+                    } else if destination == "claude" {
+                        ClaudeSessionsView()
                             .adaptiveNavigationBar()
                     }
                 }

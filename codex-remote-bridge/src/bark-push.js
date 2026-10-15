@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { resolveCodexRemoteStateDir } = require('./daemon-state');
+const { NotificationStore } = require('./notification-store');
+const { codexNotice } = require('./notification-events');
 const BODIES = Object.freeze({
   completed: 'Codex 任务已完成，请打开 CodexLink 查看。',
   failed: 'Codex 任务执行失败，请打开 CodexLink 查看。',
@@ -18,6 +20,17 @@ const TITLES = Object.freeze({
   approval: 'Codex · 等待审批',
   input: 'Codex · 需要补充信息',
   test: 'Codex · 通知测试',
+});
+const CLAUDE_BODIES = Object.freeze({
+  response_ready: 'Claude 本轮已回复，请在 Mac 查看。',
+  background: 'Claude 本轮已回复，仍有后台任务或计划任务，请在 Mac 查看。',
+  failed: 'Claude 遇到 API 错误，请在 Mac 查看。',
+  approval: 'Claude 有操作等待审批，请在 Mac 审核。',
+  input: 'Claude 需要你的补充信息，请在 Mac 查看。',
+});
+const CLAUDE_TITLES = Object.freeze({
+  response_ready: 'Claude · 本轮已回复', background: 'Claude · 后台仍有任务',
+  failed: 'Claude · API 错误', approval: 'Claude · 等待审批', input: 'Claude · 需要补充信息',
 });
 function loadBarkConfig({ stateDir = resolveCodexRemoteStateDir() } = {}) {
   const file = path.join(stateDir, 'bark-config.json');
@@ -40,22 +53,30 @@ function cleanLabel(value) {
   const chars = Array.from(text);
   return chars.length > 40 ? chars.slice(0, 40).join('') + '…' : text;
 }
-function sessionPresentation(session) {
-  if (!session || typeof session.threadId !== 'string' || !session.threadId) return null;
+function sessionPresentation(session, provider = 'codex') {
+  if (!session || (!session.sessionKey && (typeof session.threadId !== 'string' || !session.threadId))) return null;
   // UUIDv7 prefixes share timestamps; hash the entire ID to distinguish nearby/same-name sessions.
-  const shortId = createHash('sha256').update(session.threadId).digest('hex').slice(0, 8);
+  const shortId = (session.sessionKey || createHash('sha256').update(session.threadId).digest('hex')).slice(0, 8);
   const project = typeof session.cwd === 'string' ? path.basename(session.cwd.replace(/\/+$/, '')) : '';
   const name = cleanLabel(session.name) || cleanLabel(project) || '未命名会话';
-  return { body: `${name} · ${shortId}`, group: `Codex · ${shortId}` };
+  return { body: `${name} · ${shortId}`, group: `${provider === 'claude' ? 'Claude' : 'Codex'} · ${shortId}` };
 }
-async function sendBark(config, kind, { fetchImpl = fetch, session } = {}) {
-  if (!config.enabled || !Object.hasOwn(BODIES, kind)) throw new Error('Bark 未配置或通知类型无效。');
-  const presentation = config.includeSessionLabel ? sessionPresentation(session) : null;
+function notificationPresentation(config, kind, { provider = 'codex', session } = {}) {
+  const bodies = provider === 'claude' ? CLAUDE_BODIES : provider === 'codex' ? BODIES : {};
+  const titles = provider === 'claude' ? CLAUDE_TITLES : TITLES;
+  if (!Object.hasOwn(bodies, kind)) throw new Error('通知类型无效。');
+  const label = config.includeSessionLabel ? sessionPresentation(session, provider) : null;
+  return { title: label || provider === 'claude' ? titles[kind] : 'CodexLink',
+    body: label?.body || bodies[kind], group: label?.group || (provider === 'claude' ? 'Claude' : 'Codex Remote') };
+}
+async function sendBark(config, kind, { fetchImpl = fetch, session, provider = 'codex', presentation } = {}) {
+  if (!config.enabled) throw new Error('Bark 未配置。');
+  const display = presentation || notificationPresentation(config, kind, { provider, session });
   try {
     const response = await fetchImpl(config.endpoint, {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(8000),
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ device_key: config.deviceKey, title: presentation ? TITLES[kind] : 'CodexLink', body: presentation?.body || BODIES[kind], group: presentation?.group || 'Codex Remote', isArchive: '0' }),
+      body: JSON.stringify({ device_key: config.deviceKey, title: display.title, body: display.body, group: display.group, isArchive: '0' }),
     });
     if (!response.ok) return { status: 'rejected', httpStatus: response.status };
     const body = await response.json();
@@ -66,39 +87,17 @@ async function sendBark(config, kind, { fetchImpl = fetch, session } = {}) {
   }
 }
 function eventNotice(raw) {
-  let m; try { m = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return null; }
-  const p = m?.params || {}, threadId = p.threadId;
-  if (!threadId) return null;
-  let kind, identity;
-  if (m.method === 'turn/completed' && p.turn?.id && ['completed', 'failed', 'interrupted'].includes(p.turn.status)) {
-    kind = p.turn.status; identity = ['turn', threadId, p.turn.id];
-  } else if (m.id != null && ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval', 'item/permissions/requestApproval', 'item/tool/requestUserInput'].includes(m.method)) {
-    kind = m.method.endsWith('requestApproval') ? 'approval' : 'input';
-    if (!p.turnId || !p.itemId) return null;
-    identity = [kind, threadId, p.turnId, p.itemId, m.id];
-  } else return null;
-  return { kind, threadId, id: createHash('sha256').update(JSON.stringify(identity)).digest('hex') };
+  return codexNotice(raw);
 }
 function createBarkNotifications({ stateDir = resolveCodexRemoteStateDir(), config = loadBarkConfig({ stateDir }), fetchImpl = fetch, readThread = async () => null, metadataTimeoutMs = 1500,
   report = status => console.log(`[codex-remote] bark: ${JSON.stringify(status)}`), now = () => Date.now() } = {}) {
-  const stateFile = path.join(stateDir, 'bark-deliveries.json');
-  let entries = {}, enabled = config.enabled, reason = config.reason;
+  let store, timer, draining, enabled = config.enabled, reason = config.reason;
   if (enabled) {
-    try {
-      if (fs.existsSync(stateFile)) {
-        entries = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
-        if (!entries || typeof entries !== 'object' || Array.isArray(entries)) throw new Error('invalid ledger');
-      }
-    } catch { enabled = false; reason = 'invalid_delivery_ledger'; }
+    try { store = new NotificationStore(stateDir, { now }); store.prune(); }
+    catch { enabled = false; reason = 'invalid_delivery_ledger'; }
   }
   const metadata = new Map();
   report({ enabled, reason, includeSessionLabel: config.includeSessionLabel === true });
-  function persist() {
-    fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
-    const temp = `${stateFile}.${process.pid}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify(entries), { mode: 0o600 });
-    fs.renameSync(temp, stateFile);
-  }
   function remember(raw) {
     let m; try { m = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return; }
     const p = m?.params || {};
@@ -125,23 +124,41 @@ function createBarkNotifications({ stateDir = resolveCodexRemoteStateDir(), conf
     if (!enabled) return;
     if (config.includeSessionLabel) remember(raw);
     const notice = eventNotice(raw);
-    if (!notice || entries[notice.id]) return;
+    if (!notice) return;
     try {
-      // Write before dispatch; reconnect/crash must not replay uncertain deliveries.
-      const cutoff = now() - 7 * 86400000;
-      for (const [key, value] of Object.entries(entries)) if (value.at < cutoff) delete entries[key];
-      entries[notice.id] = { at: now(), kind: notice.kind, status: 'unknown' };
-      persist();
       const session = config.includeSessionLabel ? await sessionFor(notice.threadId) : undefined;
-      const result = await sendBark(config, notice.kind, { fetchImpl, session });
-      entries[notice.id].status = result.status;
-      persist();
-      report({ kind: notice.kind, ...result });
+      store.enqueue({ ...notice, presentation: notificationPresentation(config, notice.kind, { session }) });
+      await drain();
     } catch {
       enabled = false;
       report({ enabled: false, reason: 'delivery_state_write_failed' });
     }
   }
-  return { handleOutbound };
+  function drain() {
+    if (!enabled) return Promise.resolve();
+    if (draining) return draining;
+    draining = (async () => {
+      let row;
+      while (enabled && (row = store.claim())) {
+        // An opt-out made while a notice was queued also applies at dispatch.
+        const presentation = config.includeSessionLabel ? JSON.parse(row.payload) : notificationPresentation(config, row.kind, { provider: row.provider });
+        const result = await sendBark(config, row.kind, { fetchImpl, provider: row.provider, presentation });
+        store.finish(row, result.status);
+        report({ provider: row.provider, kind: row.kind, ...result });
+      }
+    })().catch(() => {
+      enabled = false;
+      report({ enabled: false, reason: 'delivery_state_write_failed' });
+    }).finally(() => { draining = null; });
+    return draining;
+  }
+  function start() {
+    if (!enabled || timer) return;
+    void drain();
+    timer = setInterval(() => { void drain(); }, 5000);
+    timer.unref();
+  }
+  async function close() { clearInterval(timer); await draining; store?.close(); }
+  return { handleOutbound, drain, start, close };
 }
-module.exports = { loadBarkConfig, sendBark, eventNotice, createBarkNotifications, sessionPresentation };
+module.exports = { loadBarkConfig, sendBark, eventNotice, createBarkNotifications, sessionPresentation, notificationPresentation, cleanLabel };

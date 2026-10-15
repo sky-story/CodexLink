@@ -38,9 +38,12 @@ test('duplicate event, parallel event and restart send once; persisted journal c
   await Promise.all([notifier.handleOutbound(completed), notifier.handleOutbound(completed)]);
   await createBarkNotifications(options).handleOutbound(completed);
   assert.equal(sends, 1);
-  const ledger = fs.readFileSync(path.join(stateDir, 'bark-deliveries.json'), 'utf8');
+  const { NotificationStore } = require('../src/notification-store');
+  const store = new NotificationStore(stateDir);
+  const ledger = JSON.stringify(store.db.prepare('SELECT * FROM notices').all());
+  store.close();
   assert(!ledger.includes(config.deviceKey)); assert(!ledger.includes('PRIVATE')); assert(!ledger.includes('private-thread'));
-  assert.equal(fs.statSync(path.join(stateDir, 'bark-deliveries.json')).mode & 0o077, 0);
+  assert.equal(fs.statSync(path.join(stateDir, 'notification-deliveries.sqlite')).mode & 0o077, 0);
 });
 test('transport uncertainty and server rejection are redacted and never replayed', async t => {
   for (const fetchImpl of [async () => { throw new Error(config.deviceKey); }, async () => ({ ok: false, status: 500 }), async () => ({ ok: true, status: 200, json: async () => ({ code: 400, message: config.deviceKey }) })]) {

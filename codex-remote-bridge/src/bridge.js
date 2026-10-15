@@ -116,6 +116,8 @@ function startBridge({
   const barkNotifications = require("./bark-push").createBarkNotifications({
     readThread: async threadId => (await sendCodexRequest("thread/read", { threadId, includeTurns: false })).thread,
   });
+  barkNotifications.start?.();
+  const claudeChannels = require("./claude-channel-router").createClaudeChannelRouter();
   const readBridgePackageVersionStatus = createBridgePackageVersionStatusReader();
 
   // Keep the local Codex runtime alive across transient relay disconnects.
@@ -493,6 +495,9 @@ function startBridge({
   // Routes decrypted app payloads through the same bridge handlers as before.
   function handleApplicationMessage(rawMessage) {
     if (handleBridgeManagedHandshakeMessage(rawMessage)) {
+      return;
+    }
+    if (claudeChannels.handle(rawMessage, sendApplicationResponse)) {
       return;
     }
     if (handleBridgeManagedAccountRequest(rawMessage, sendApplicationResponse)) {
@@ -905,6 +910,7 @@ function startBridge({
         id: parsed.id,
         result: {
           bridgeManaged: true,
+          claudeChannels: true,
           sharedSession: codex.mode === "shared",
           sessionSettings: codex.mode === "shared",
           turnStateSnapshot: codex.mode === "shared",

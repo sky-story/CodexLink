@@ -313,6 +313,7 @@ extension CodexService {
     }
 
     func initializeSession() async throws {
+        supportsClaudeChannels = false
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
         let clientInfo: JSONValue = .object([
             "name": .string("codexmobile_ios"),
@@ -331,6 +332,7 @@ extension CodexService {
 
         do {
             let handshake = try await sendRequest(method: "initialize", params: modernParams)
+            supportsClaudeChannels = handshake.result?.objectValue?["claudeChannels"]?.boolValue == true
             supportsSharedSessionSettings = handshake.result?.objectValue?["sessionSettings"]?.boolValue == true
             supportsMacTerminalOpen = handshake.result?.objectValue?["macTerminalOpen"]?.boolValue == true
             supportsSharedSessionControl = handshake.result?.objectValue?["sharedSession"]?.boolValue == true
