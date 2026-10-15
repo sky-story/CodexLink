@@ -5,10 +5,14 @@ const { createHash } = require('node:crypto');
 const { resolveCodexRemoteStateDir } = require('./daemon-state');
 const { NotificationStore } = require('./notification-store');
 const { codexNotice } = require('./notification-events');
-// Public artwork only. Pin CodexLink to a published revision; Claude uses the
-// artwork URL from Anthropic's official App Store listing. Bark caches by URL.
+// Public artwork only. Resize the pinned CodexLink image through an HTTPS image
+// cache: direct GitHub/CDN downloads can exceed Bark's 10-second phone timeout.
+// Claude uses Anthropic's official App Store artwork. Bark caches by URL.
 const DEFAULT_BARK_ICONS = Object.freeze({
-  codex: 'https://cdn.jsdelivr.net/gh/sky-story/CodexLink@dfc98b63cfde02d7071f54e5f48c886f8d6db4c9/CodexMobile/CodexMobile/Assets.xcassets/AppLogo.imageset/CodexRemote-iOS-Default-1024x1024.png',
+  codex: `https://wsrv.nl/?${new URLSearchParams({
+    url: 'https://raw.githubusercontent.com/sky-story/CodexLink/dfc98b63cfde02d7071f54e5f48c886f8d6db4c9/CodexMobile/CodexMobile/Assets.xcassets/AppLogo.imageset/CodexRemote-iOS-Default-1024x1024.png',
+    w: '256', h: '256', fit: 'contain', output: 'png',
+  })}`,
   claude: 'https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/51/61/43/51614377-8976-4277-5f5e-90c614b04913/AppIcon-0-0-1x_U007epad-0-1-85-220.png/512x512bb.jpg',
 });
 const BODIES = Object.freeze({

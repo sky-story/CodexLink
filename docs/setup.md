@@ -138,11 +138,13 @@ node scripts/private-service.cjs restart
 node scripts/bark-notifications.cjs --status
 ```
 
-`default` 为 Codex 选择项目原有的紫蓝色 CodexLink 图标，为 Claude 选择 [Anthropic 官方 App Store](https://apps.apple.com/us/app/claude-by-anthropic/id6473753684) 的 Logo。CodexLink 图片经 jsDelivr 从固定的公开 Git 提交读取；Claude 图片来自 Apple 图片 CDN。图片地址不会包含会话 ID 或设备 Key。图标按事件来源选择，不受哪一个后台进程负责发送影响。
+`default` 为 Codex 选择项目原有的紫蓝色 CodexLink 图标，为 Claude 选择 [Anthropic 官方 App Store](https://apps.apple.com/us/app/claude-by-anthropic/id6473753684) 的 Logo。CodexLink 图片由 HTTPS 图片缓存 `wsrv.nl` 从固定的公开 Git 提交读取并缩小到 256 × 256；Claude 图片来自 Apple 图片 CDN。图片地址不会包含会话 ID 或设备 Key。图标按事件来源选择，不受哪一个后台进程负责发送影响。
 
 也可以把 `default` 换成自己托管的 HTTPS 图片地址，或用 `--icon codex off` / `--icon claude off` 恢复对应来源的 Bark 默认图标。命令保留接收设备、会话标签和其他来源的配置；修改后重启 Bridge。首次升级需更新 Claude Hooks，新开会话后加载新版发送器，已运行的旧版窗口仍可能显示 Bark 默认图标，不会自动终止它们。
 
 [Bark 自定义图标](https://github.com/Finb/Bark/blob/master/docs/params.md#icon) 需要 iOS 15 及以上。图片由 iPhone 下载并按 URL 缓存，首次下载超过 10 秒会退回默认图标。手机仅启用 Tailscale 时仍需能访问所选图片域名；Mac 下载成功不能代替手机网络验证。更换同一地址的图片不会立即清除 Bark 缓存，应使用新 URL。此功能改变通知显示图标，通知接收 App 仍是 Bark。
+
+真机已确认上述两个来源分别正确显示 CodexLink 图标和 Claude Logo。通知头像旁的小 Bark 标识属于接收 App 的系统标识，会保留，见 [Apple 通知设计规范](https://developer.apple.com/design/human-interface-guidelines/notifications/)。最初使用的 jsDelivr CodexLink 地址在手机上曾回退为默认图标，因此改用已通过手机验证的图片缓存地址。
 
 需要向真实手机预览时，分别运行以下命令；它们只发送通用测试文字，不启动模型任务：
 
