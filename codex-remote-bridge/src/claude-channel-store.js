@@ -38,6 +38,7 @@ class ClaudeChannelStore {
         seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, session_id TEXT NOT NULL,
         role TEXT NOT NULL, text TEXT NOT NULL, source TEXT NOT NULL, created_at INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS messages_session ON messages(session_id,seq);
+      CREATE INDEX IF NOT EXISTS messages_session_role ON messages(session_id,role,seq);
       CREATE TABLE IF NOT EXISTS commands (
         id TEXT PRIMARY KEY, session_id TEXT NOT NULL, generation TEXT NOT NULL, action TEXT NOT NULL,
         payload TEXT NOT NULL, status TEXT NOT NULL, detail TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
@@ -87,7 +88,9 @@ class ClaudeChannelStore {
     return this.transaction(() => { this.requireSession(id, generation); this.invalidate(id, 'Claude session closed'); this.setPhase(id, 'closed'); });
   }
   sessionView(s) {
+    const lastAssistantSeq = this.db.prepare("SELECT COALESCE(MAX(seq),0) AS seq FROM messages WHERE session_id=? AND role='assistant'").get(s.id).seq;
     return { id: s.id, generation: s.generation, name: s.name, project: path.basename(s.cwd), phase: s.phase,
+      cwd: s.cwd, lastAssistantSeq,
       online: s.phase !== 'closed' && s.heartbeat > this.now() - LEASE_MS, verified: Boolean(s.verified), updatedAt: s.updated_at };
   }
   list() { return { data: this.db.prepare('SELECT * FROM sessions ORDER BY updated_at DESC LIMIT 100').all().map(s => this.sessionView(s)) }; }

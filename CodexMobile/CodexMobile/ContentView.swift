@@ -346,8 +346,9 @@ struct ContentView: View {
                         onOpenThread: { thread in
                             openThreadFromSidebar(thread)
                         },
-                        onOpenClaude: {
-                            navigationPath.append("claude")
+                        onOpenSessions: {
+                            closeSidebar()
+                            navigationPath.append("sessions")
                         }
                     )
                     .frame(width: currentSidebarWidth)
@@ -392,8 +393,18 @@ struct ContentView: View {
                     } else if destination == "claude" {
                         ClaudeSessionsView()
                             .adaptiveNavigationBar()
+                    } else if destination == "sessions" {
+                        SessionOverviewView { thread in
+                            navigationPath = NavigationPath()
+                            openThreadFromSidebar(thread)
+                        }
+                        .adaptiveNavigationBar()
                     }
                 }
+        }
+        .onChange(of: navigationPath) { _, path in
+            codex.isCodexTimelineVisible = path.isEmpty
+            if path.isEmpty { codex.requestImmediateActiveThreadSync(threadId: codex.activeThreadId) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

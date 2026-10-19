@@ -211,6 +211,7 @@ struct ClaudeConversationView: View {
             messages = indexed.values.sorted { $0.seq < $1.seq }
             if older || wasEmpty { nextBefore = result.nextBefore }
             snapshot = result
+            if !older, scenePhase == .active { codex.markClaudeSessionSeen(result) }
             await codex.recoverClaudeOperations(sessionID: sessionID)
             unconfirmed = codex.pendingClaudeOperations(sessionID: sessionID)
             errorMessage = nil

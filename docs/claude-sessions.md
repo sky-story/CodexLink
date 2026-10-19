@@ -1,6 +1,6 @@
 # 在 CodexLink 中使用 Claude 会话
 
-此版本在现有 iPhone App 的侧栏增加 **Claude 会话**。可以查看通过专用命令启动的 Mac 会话、发送文字、读取接入后的文字记录，以及对工具请求作出一次性允许或拒绝。Codex 的会话和控制入口继续使用原来的协议。
+在 iPhone 侧栏进入 **会话总览**，可以按项目查看 Codex 和通过专用命令启动的 Claude 会话。选择 Claude 会话可发送文字、读取接入后的文字记录，以及对工具请求作出一次性允许或拒绝。右上角 **Claude 接入** 保留专用列表和说明。各 Agent 的会话控制继续使用原来的协议。
 
 手机仍只需 Tailscale。消息与审批沿用现有配对后的端到端加密连接；模型请求由 Mac 上的 Claude Code 使用其现有账号和网络发出。无需手机 Claude App 或 Claude Remote Control。
 
@@ -26,7 +26,7 @@ node /path/to/CodexLink/scripts/claude-session.cjs --name "我的项目"
 
 替换示例中的路径。脚本沿用正常 Claude 配置与登录，只为这一次启动增加本地 Channel 和会话观察 Hooks，没有设置跳过权限检查。不会永久修改项目的 `.mcp.json` 或用户的 Claude 设置。启动器仅接受 `--name` 和 `--resume`；原启动命令临时指定的模型、权限模式或额外提示词参数不会自动透传，恢复旧会话时需核对。
 
-Claude 会要求确认本地开发通道 `server:codexlink`，选择 **I am using this for local development**。项目信任、MCP 同意及其他初始授权仍需在 Mac 完成。确认后保持这个终端会话打开，iPhone 侧栏选择 **Claude 会话** 即可看到它。
+Claude 会要求确认本地开发通道 `server:codexlink`，选择 **I am using this for local development**。项目信任、MCP 同意及其他初始授权仍需在 Mac 完成。确认后保持这个终端会话打开，iPhone 侧栏选择 **会话总览** 即可看到它。
 
 普通 `claude` 会话仍可通过第一阶段的 Hooks 推送锁屏通知，但不会自动变成可远程交互的会话。需要历史上下文时，先退出原会话，再在同一工作目录使用 `--resume <完整 Claude 会话 UUID>` 启动上述脚本。不要同时运行两个恢复同一 UUID 的 CLI；脚本可以拒绝已在线的本地 Channel，但无法识别所有未接入本项目的普通 CLI。
 
@@ -67,7 +67,7 @@ Channel 会向模型提供工具说明，手机消息和 `reply` 工具调用也
 
 ## 手机操作
 
-1. 在侧栏打开 **Claude 会话**，选择在线会话。
+1. 在侧栏打开 **会话总览**，选择在线的 Claude 会话。
 2. 发送文字。手机显示“Mac 已排队”或“已发送，等待 Claude 回复”；收到对应的回复工具调用后才显示“Claude 已回复”。
 3. 审批卡片展示工具名称、说明和参数。核对后选择 **本次允许** 或 **拒绝**；允许会再确认一次，不提供永久放行。
 

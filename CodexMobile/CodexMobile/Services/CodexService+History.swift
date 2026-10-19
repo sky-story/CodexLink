@@ -14,6 +14,84 @@ private enum RunningThreadHistoryCatchupPolicy {
 }
 
 extension CodexService {
+    // Commits a detached history worker's result back to the current timeline.
+    func applyHistoryMerge(_ merged: [CodexMessage], baseline: [CodexMessage], threadId: String) {
+        let current = messagesByThread[threadId] ?? []
+        let rebased = Self.rebaseHistoryMerge(merged, baseline: baseline, current: current)
+#if DEBUG
+        if MessageSyncTrace.isEnabled(for: threadId) {
+            MessageSyncTrace.record(threadId: threadId, phase: "before-history-commit", messages: current)
+            MessageSyncTrace.record(threadId: threadId, phase: "after-history-commit", messages: rebased,
+                                    projected: TurnTimelineReducer.project(messages: rebased).messages)
+        }
+#endif
+        guard rebased != current else { return }
+        messagesByThread[threadId] = rebased
+        persistMessages()
+        updateCurrentOutput(for: threadId)
+    }
+
+    // A detached merge can finish after new deltas, item/completed, or another refresh.
+    // Rebase only those concurrent changes in O(n); do not rerun the full history matcher
+    // on the main actor or replace the current array with the worker's stale snapshot.
+    nonisolated static func rebaseHistoryMerge(
+        _ merged: [CodexMessage], baseline: [CodexMessage], current: [CodexMessage]
+    ) -> [CodexMessage] {
+        guard current != baseline else { return merged }
+        let baselineByID = Dictionary(baseline.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        let currentByID = Dictionary(current.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        let currentByItem = Dictionary(
+            current.filter { normalizedHistoryIdentifier($0.itemId) != nil }.map { (historyMessageKey(for: $0), $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var result: [CodexMessage] = []
+        var consumed = Set<String>()
+        for historical in merged {
+            if let before = baselineByID[historical.id] {
+                // A concurrent deletion must not be resurrected by the old worker.
+                guard let latest = currentByID[historical.id] else { continue }
+                var value = historical
+                func preserve<T: Equatable>(_ field: WritableKeyPath<CodexMessage, T>) {
+                    if latest[keyPath: field] != before[keyPath: field] {
+                        value[keyPath: field] = latest[keyPath: field]
+                    }
+                }
+                preserve(\.text)
+                preserve(\.kind)
+                preserve(\.createdAt)
+                preserve(\.turnId)
+                preserve(\.itemId)
+                preserve(\.isStreaming)
+                preserve(\.deliveryState)
+                preserve(\.attachments)
+                preserve(\.fileMentions)
+                preserve(\.planState)
+                preserve(\.planPresentation)
+                preserve(\.proposedPlan)
+                preserve(\.subagentAction)
+                preserve(\.structuredUserInputRequest)
+                consumed.insert(latest.id)
+                result.append(value)
+            } else if let latest = currentByID[historical.id]
+                ?? (normalizedHistoryIdentifier(historical.itemId) == nil ? nil : currentByItem[historyMessageKey(for: historical)]) {
+                // History and a live event can independently discover the same item while
+                // the worker runs. Keep the live row identity and its latest terminal state.
+                guard consumed.insert(latest.id).inserted else { continue }
+                var value = latest
+                value.orderIndex = historical.orderIndex
+                if value.text.isEmpty { value.text = historical.text }
+                if value.attachments.isEmpty { value.attachments = historical.attachments }
+                if value.fileMentions.isEmpty { value.fileMentions = historical.fileMentions }
+                result.append(value)
+            } else {
+                result.append(historical)
+            }
+        }
+        let canonicalIDs = result.map(\.id)
+        result.append(contentsOf: current.filter { !consumed.contains($0.id) && baselineByID[$0.id] == nil })
+        return restoringHistoryOrder(result, historyRowIDs: canonicalIDs, localOrder: current, unanchoredAtEnd: true)
+    }
+
     nonisolated static func shouldPreferRecentHistoryWindow(
         existingCount: Int,
         historyCount: Int,
@@ -69,7 +147,6 @@ extension CodexService {
         let baseDate = decodeHistoryBaseDate(from: threadObject)
         let turns = threadObject["turns"]?.arrayValue ?? []
 
-        var offset: TimeInterval = 0
         var result: [CodexMessage] = []
 
         for turnValue in turns {
@@ -78,6 +155,7 @@ extension CodexService {
             let turnTimestamp = decodeHistoryTimestamp(from: turnObject)
             let turnCompleted = isCompletedHistoryTurn(turnObject)
             let items = turnObject["items"]?.arrayValue ?? []
+            var offset: TimeInterval = 0
 
             for itemValue in items {
                 guard let itemObject = itemValue.objectValue,
@@ -441,7 +519,7 @@ extension CodexService {
         if existing.isEmpty {
             // History messages arrive in server order; assign sequential orderIndex values
             // so that the stable sort preserves server-provided chronology.
-            var sorted = history.sorted(by: { $0.createdAt < $1.createdAt })
+            var sorted = history
             for index in sorted.indices {
                 sorted[index].orderIndex = CodexMessageOrderCounter.next()
             }
@@ -449,6 +527,14 @@ extension CodexService {
         }
 
         var merged = existing
+        var historyRowIDs: [String] = []
+        func reconcile(at index: Int, with message: CodexMessage) {
+            historyRowIDs.append(merged[index].id)
+            merged[index] = reconcileExistingMessage(
+                merged[index], with: message,
+                activeThreadIDs: activeThreadIDs, runningThreadIDs: runningThreadIDs
+            )
+        }
         let assistantHistoryCountByTurn = Dictionary(
             grouping: history.filter { $0.role == .assistant }
         ) { $0.turnId ?? "" }
@@ -469,7 +555,7 @@ extension CodexService {
                    message: message,
                    turnId: turnId
                ) {
-                merged[index] = reconcileExistingMessage(merged[index], with: message, activeThreadIDs: activeThreadIDs, runningThreadIDs: runningThreadIDs)
+                reconcile(at: index, with: message)
                 continue
             }
 
@@ -488,7 +574,7 @@ extension CodexService {
                            serverMessage: message
                        )
                }) {
-                merged[index] = reconcileExistingMessage(merged[index], with: message, activeThreadIDs: activeThreadIDs, runningThreadIDs: runningThreadIDs)
+                reconcile(at: index, with: message)
                 continue
             }
 
@@ -530,12 +616,9 @@ extension CodexService {
                         merged[index],
                         with: message
                     ) {
-                        merged[index] = reconcileExistingMessage(
-                            merged[index],
-                            with: message,
-                            activeThreadIDs: activeThreadIDs,
-                            runningThreadIDs: runningThreadIDs
-                        )
+                        reconcile(at: index, with: message)
+                    } else {
+                        historyRowIDs.append(merged[index].id)
                     }
                     continue
                 }
@@ -548,7 +631,7 @@ extension CodexService {
                    message: message,
                    turnId: turnId
                ) {
-                merged[index] = reconcileExistingMessage(merged[index], with: message, activeThreadIDs: activeThreadIDs, runningThreadIDs: runningThreadIDs)
+                reconcile(at: index, with: message)
                 continue
             }
 
@@ -563,7 +646,7 @@ extension CodexService {
                        && candidate.kind == .thinking
                        && candidate.turnId == turnId
                }) {
-                merged[index] = reconcileExistingMessage(merged[index], with: message, activeThreadIDs: activeThreadIDs, runningThreadIDs: runningThreadIDs)
+                reconcile(at: index, with: message)
                 continue
             }
 
@@ -577,7 +660,7 @@ extension CodexService {
                        && candidate.kind == .fileChange
                        && (candidate.turnId == nil || candidate.turnId == turnId)
                }) {
-                merged[index] = reconcileExistingMessage(merged[index], with: message, activeThreadIDs: activeThreadIDs, runningThreadIDs: runningThreadIDs)
+                reconcile(at: index, with: message)
                 continue
             }
 
@@ -597,7 +680,7 @@ extension CodexService {
                     let incomingItemId = normalizedHistoryIdentifier(message.itemId)
                     return candidateItemId != nil && candidateItemId == incomingItemId
                 }) {
-                    merged[itemIndex] = reconcileExistingMessage(merged[itemIndex], with: message, activeThreadIDs: activeThreadIDs, runningThreadIDs: runningThreadIDs)
+                    reconcile(at: itemIndex, with: message)
                     continue
                 }
 
@@ -609,7 +692,7 @@ extension CodexService {
                     with: message,
                     requiresExactText: false
                    ) {
-                    merged[index] = reconcileExistingMessage(merged[index], with: message, activeThreadIDs: activeThreadIDs, runningThreadIDs: runningThreadIDs)
+                    reconcile(at: index, with: message)
                     continue
                 }
 
@@ -624,7 +707,7 @@ extension CodexService {
 
                     if reconcilableIndices.count == 1,
                        let index = reconcilableIndices.last {
-                        merged[index] = reconcileExistingMessage(merged[index], with: message, activeThreadIDs: activeThreadIDs, runningThreadIDs: runningThreadIDs)
+                        reconcile(at: index, with: message)
                         continue
                     }
                 }
@@ -644,7 +727,7 @@ extension CodexService {
                    }
                    return candidateCommandKey == incomingCommandKey
                }) {
-                merged[index] = reconcileExistingMessage(merged[index], with: message, activeThreadIDs: activeThreadIDs, runningThreadIDs: runningThreadIDs)
+                reconcile(at: index, with: message)
                 continue
             }
 
@@ -658,13 +741,13 @@ extension CodexService {
                        && candidate.kind == .commandExecution
                        && candidate.turnId == turnId
                }) {
-                merged[index] = reconcileExistingMessage(merged[index], with: message, activeThreadIDs: activeThreadIDs, runningThreadIDs: runningThreadIDs)
+                reconcile(at: index, with: message)
                 continue
             }
 
             let key = historyMessageKey(for: message)
             if let index = merged.firstIndex(where: { historyMessageKey(for: $0) == key }) {
-                merged[index] = reconcileExistingMessage(merged[index], with: message, activeThreadIDs: activeThreadIDs, runningThreadIDs: runningThreadIDs)
+                reconcile(at: index, with: message)
                 continue
             }
 
@@ -673,15 +756,76 @@ extension CodexService {
                    in: merged,
                    message: message
                ) {
-                merged[pendingIndex] = reconcileExistingMessage(merged[pendingIndex], with: message, activeThreadIDs: activeThreadIDs, runningThreadIDs: runningThreadIDs)
+                reconcile(at: pendingIndex, with: message)
                 continue
             }
 
             merged.append(message)
+            historyRowIDs.append(message.id)
         }
 
-        merged.sort(by: { $0.orderIndex < $1.orderIndex })
-        return merged
+        return restoringHistoryOrder(merged, historyRowIDs: historyRowIDs, localOrder: existing)
+    }
+
+    // The server's turn/item sequence is authoritative for recovered rows. Keep local-only
+    // rows beside their observed neighbours (including in-turn steer), rather than sorting
+    // the whole transcript by wall clocks or by when a missing item finally arrived.
+    nonisolated static func restoringHistoryOrder(
+        _ messages: [CodexMessage],
+        historyRowIDs: [String],
+        localOrder: [CodexMessage],
+        unanchoredAtEnd: Bool = false
+    ) -> [CodexMessage] {
+        let byID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        var seen = Set<String>()
+        let canonicalIDs = historyRowIDs.filter { byID[$0] != nil && seen.insert($0).inserted }
+        guard !canonicalIDs.isEmpty else { return messages }
+        let ranks = Dictionary(uniqueKeysWithValues: canonicalIDs.enumerated().map { ($1, $0) })
+        let hasLocalAnchor = localOrder.contains { ranks[$0.id] != nil }
+        let lastHistoryDate = canonicalIDs.last.flatMap { byID[$0]?.createdAt }
+        var firstRankByTurn: [String: Int] = [:]
+        for (rank, id) in canonicalIDs.enumerated() {
+            if let turn = byID[id]?.turnId, firstRankByTurn[turn] == nil { firstRankByTurn[turn] = rank }
+        }
+        var lastRank = -1
+        var lastRankByTurn: [String: Int] = [:]
+        var buckets: [Int: [CodexMessage]] = [:]
+        var placed = Set(canonicalIDs)
+        for local in localOrder {
+            if let rank = ranks[local.id] {
+                lastRank = max(lastRank, rank)
+                if let turn = local.turnId { lastRankByTurn[turn] = max(lastRankByTurn[turn] ?? -1, rank) }
+                continue
+            }
+            guard let message = byID[local.id], placed.insert(local.id).inserted else { continue }
+            let anchor: Int
+            if let turn = message.turnId, let firstRank = firstRankByTurn[turn] {
+                anchor = lastRankByTurn[turn] ?? (firstRank - 1)
+            } else if lastRank >= 0 {
+                anchor = lastRank
+            } else {
+                // With no shared neighbour at all (e.g. first hydration plus a pending
+                // send), use a trustworthy history boundary only to choose prefix/tail.
+                // It never changes the server sequence or sorts live rows by clocks.
+                let followsHistory = !hasLocalAnchor && lastHistoryDate.map {
+                    CodexTimestampParser.isTrustworthyServerDate($0) && message.createdAt > $0
+                } == true
+                anchor = unanchoredAtEnd || message.isStreaming || followsHistory
+                    ? canonicalIDs.count - 1 : -1
+            }
+            buckets[anchor, default: []].append(message)
+        }
+        var result = buckets[-1] ?? []
+        for (rank, id) in canonicalIDs.enumerated() {
+            if let message = byID[id] { result.append(message) }
+            result.append(contentsOf: buckets[rank] ?? [])
+        }
+        result.append(contentsOf: messages.filter { placed.insert($0.id).inserted })
+        // Preserve indices on an identical reload; only repair them when chronology changed.
+        if zip(result, result.dropFirst()).contains(where: { $0.orderIndex >= $1.orderIndex }) {
+            for index in result.indices { result[index].orderIndex = CodexMessageOrderCounter.next() }
+        }
+        return result
     }
 
     // Keeps running-thread reopen bounded to the recent transcript tail so A/B switching
@@ -710,6 +854,19 @@ extension CodexService {
 
         let prefixCount = max(existing.count - normalizedWindowSize, 0)
         let stablePrefix = Array(existing.prefix(prefixCount))
+        // Count alone cannot prove that an older reply was received. A previously
+        // corrupted cache may be long enough while still missing/reordering a final.
+        // Only skip chat rows when their stable identities are complete and ordered.
+        let expectedPrefixKeys = history.dropLast(normalizedWindowSize)
+            .filter { $0.role != .system && normalizedHistoryIdentifier($0.itemId) != nil }
+            .map(historyMessageKey)
+        let expectedKeySet = Set(expectedPrefixKeys)
+        let localPrefixKeys = stablePrefix.map(historyMessageKey).filter { expectedKeySet.contains($0) }
+        if localPrefixKeys != expectedPrefixKeys {
+            return try mergeHistoryMessages(
+                existing, history, activeThreadIDs: activeThreadIDs, runningThreadIDs: runningThreadIDs
+            )
+        }
         let recentExisting = Array(existing.suffix(normalizedWindowSize))
         let recentHistory = Array(history.suffix(normalizedWindowSize))
         let mergedTail = try mergeHistoryMessages(
@@ -729,6 +886,8 @@ extension CodexService {
 
     func decodeHistoryTimestamp(from object: [String: JSONValue]) -> Date? {
         let numericKeys = [
+            "startedAt",
+            "started_at",
             "createdAt",
             "created_at",
             "timestamp",
@@ -1162,6 +1321,7 @@ extension CodexService {
     ) -> Bool {
         guard candidate.role == .user,
               candidate.deliveryState != .failed,
+              userHistoryIdentityIsCompatible(candidate, message),
               normalizedMessageText(candidate.text) == normalizedMessageText(message.text),
               userMessageMetadataLooksCompatible(localMessage: candidate, serverMessage: message) else {
             return false
@@ -1177,11 +1337,24 @@ extension CodexService {
     ) -> Bool {
         guard candidate.role == .user,
               candidate.deliveryState == .pending,
+              userHistoryIdentityIsCompatible(candidate, message),
               normalizedMessageText(candidate.text) == normalizedMessageText(message.text),
               userMessageMetadataLooksCompatible(localMessage: candidate, serverMessage: message) else {
             return false
         }
 
+        return true
+    }
+
+    nonisolated static func userHistoryIdentityIsCompatible(_ lhs: CodexMessage, _ rhs: CodexMessage) -> Bool {
+        if let lhsTurn = normalizedHistoryIdentifier(lhs.turnId),
+           let rhsTurn = normalizedHistoryIdentifier(rhs.turnId), lhsTurn != rhsTurn {
+            return false
+        }
+        if let lhsItem = normalizedHistoryIdentifier(lhs.itemId),
+           let rhsItem = normalizedHistoryIdentifier(rhs.itemId), lhsItem != rhsItem {
+            return false
+        }
         return true
     }
 

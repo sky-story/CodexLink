@@ -146,6 +146,8 @@ node scripts/bark-notifications.cjs --status
 
 真机已确认上述两个来源分别正确显示 CodexLink 图标和 Claude Logo。通知头像旁的小 Bark 标识属于接收 App 的系统标识，会保留，见 [Apple 通知设计规范](https://developer.apple.com/design/human-interface-guidelines/notifications/)。最初使用的 jsDelivr CodexLink 地址在手机上曾回退为默认图标，因此改用已通过手机验证的图片缓存地址。
 
+上述图标验证针对 iPhone。Bark 在手机上将图片设为通知发送者头像，接收应用身份仍是 Bark；通过 [iPhone 镜像同步到 Mac](https://support.apple.com/zh-cn/120684) 时，macOS 负责绘制通知及来源 App 标识，可能仍显示 Bark 图标。手机显示自定义头像不代表 Mac 也会保留它，`icon` 参数不能更改通知所属应用。
+
 需要向真实手机预览时，分别运行以下命令；它们只发送通用测试文字，不启动模型任务：
 
 ```sh

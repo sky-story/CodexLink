@@ -36,8 +36,9 @@ extension CodexService {
 
         threadListSyncTask = Task { [weak self] in
             while let self, !Task.isCancelled {
-                await self.syncThreadsList()
-                await self.refreshInactiveRunningBadgeThreads()
+                if !self.isBootstrappingConnectionSync {
+                    await self.syncThreadsList()
+                }
                 let interval = self.isAppInForeground ? listIntervalForegroundNs : listIntervalBackgroundNs
                 try? await Task.sleep(nanoseconds: interval)
             }
@@ -45,7 +46,7 @@ extension CodexService {
 
         activeThreadSyncTask = Task { [weak self] in
             while let self, !Task.isCancelled {
-                if let threadId = self.activeThreadId {
+                if !self.isBootstrappingConnectionSync, self.isCodexTimelineVisible, let threadId = self.activeThreadId {
                     let hasActiveOrRunningTurn = self.threadHasActiveOrRunningTurn(threadId)
                     let wantsMirroredRunningCatchup = self.shouldPrioritizeMirroredRunningCatchup(threadId)
                     await self.syncActiveThreadState(threadId: threadId)
@@ -69,13 +70,14 @@ extension CodexService {
 
         runningThreadWatchSyncTask = Task { [weak self] in
             while let self, !Task.isCancelled {
-                await self.refreshInactiveRunningBadgeThreads()
+                if !self.isBootstrappingConnectionSync {
+                    await self.refreshInactiveRunningBadgeThreads()
+                }
                 let interval = self.isAppInForeground ? watchIntervalForegroundNs : watchIntervalBackgroundNs
                 try? await Task.sleep(nanoseconds: interval)
             }
         }
 
-        requestImmediateSync(threadId: activeThreadId)
     }
 
     func stopSyncLoop() {
@@ -98,7 +100,6 @@ extension CodexService {
         if isForeground {
             if isConnected && isInitialized {
                 startSyncLoop()
-                requestImmediateSync(threadId: activeThreadId)
                 // Re-check bridge-managed state when the app becomes active again.
                 Task { @MainActor [weak self] in
                     await self?.refreshBridgeManagedState(allowAvailableBridgeUpdatePrompt: true)
@@ -109,7 +110,6 @@ extension CodexService {
         } else {
             if isConnected && isInitialized {
                 startSyncLoop()
-                requestImmediateSync(threadId: activeThreadId)
             } else {
                 stopSyncLoop()
             }
@@ -122,11 +122,27 @@ extension CodexService {
             return
         }
 
-        Task { @MainActor [weak self] in
+        pendingImmediateSyncThreadID = threadId ?? activeThreadId
+        guard pendingImmediateSyncTask == nil else { return }
+        let token = UUID()
+        pendingImmediateSyncToken = token
+        pendingImmediateSyncTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            defer {
+                if self.pendingImmediateSyncToken == token {
+                    self.pendingImmediateSyncTask = nil
+                    self.pendingImmediateSyncToken = nil
+                    self.pendingImmediateSyncThreadID = nil
+                }
+            }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
             await self.syncThreadsList()
+            guard !Task.isCancelled else { return }
             await self.refreshInactiveRunningBadgeThreads()
-            if let threadId = threadId ?? self.activeThreadId {
+            guard !Task.isCancelled else { return }
+            // Resolve after the list RPC: a rapid switch may have selected another chat.
+            if let threadId = self.pendingImmediateSyncThreadID ?? self.activeThreadId {
                 await self.syncActiveThreadState(threadId: threadId)
             }
         }
@@ -152,20 +168,9 @@ extension CodexService {
         }
 
         do {
-            let activeThreads = try await fetchServerThreads(limit: recentActiveThreadListLimit)
-
-            // Also fetch server-archived threads so they survive app restarts.
-            var archivedThreads: [CodexThread] = []
-            do {
-                archivedThreads = try await fetchServerThreads(limit: recentArchivedThreadListLimit, archived: true)
-            } catch {
-                debugSyncLog("thread/list archived fetch failed (non-fatal): \(error.localizedDescription)")
-            }
-
-            reconcileLocalThreadsWithServer(activeThreads, serverArchivedThreads: archivedThreads)
-            debugSyncLog("sync thread/list active=\(activeThreads.count) archived=\(archivedThreads.count) local=\(threads.count)")
+            try await listThreads()
         } catch {
-            presentConnectionErrorIfNeeded(error)
+            if !Task.isCancelled { presentConnectionErrorIfNeeded(error) }
         }
     }
 
@@ -257,11 +262,13 @@ extension CodexService {
             deletedThreadIDs: persistedDeletedIDs
         )
 
-        threads = sortThreads(Array(merged.values))
-        assistantRevertStateCacheByThread.removeAll()
-        refreshBusyRepoRootsAndDependentTimelineStates()
-        // Full reconciliation — always refresh all threads even if busy-roots already hit some.
-        refreshAllThreadTimelineStates()
+        let updatedThreads = sortThreads(Array(merged.values))
+        if threads != updatedThreads {
+            threads = updatedThreads
+            assistantRevertStateCacheByThread.removeAll()
+            refreshBusyRepoRootsAndDependentTimelineStates()
+            refreshAllThreadTimelineStates()
+        }
 
         if activeThreadId == nil {
             activeThreadId = firstLiveThreadID()
@@ -832,6 +839,7 @@ extension CodexService {
     // Polls the currently displayed thread even while it is running so missed socket events can recover.
     // If the live snapshot fails, fall back to a history refresh instead of trusting stale running state.
     func syncActiveThreadState(threadId: String) async {
+        guard isCodexTimelineVisible else { return }
         var wasRunning = threadHasActiveOrRunningTurn(threadId)
         var didRunMirroredCatchup = false
         let shouldPreferDeferredClosedHydration = shouldDeferHeavyDisplayHydration(threadId: threadId)
@@ -890,7 +898,7 @@ extension CodexService {
             }
             .map(\.threadId)
             .filter { threadId in
-                threadId != activeThreadId
+                (threadId != activeThreadId || !isCodexTimelineVisible)
                     && availableThreadIDs.contains(threadId)
                     && runningThreadIDs.contains(threadId)
             }
@@ -904,7 +912,13 @@ extension CodexService {
                 continue
             }
 
-            await syncThreadHistory(threadId: threadId, force: true)
+            if didRefresh && supportsTurnStateSnapshot {
+                // Keep inactive chats on metadata only. Their full transcript is
+                // reconciled when opened, while completion/approval signals stay live.
+                threadsNeedingCanonicalHistoryReconcile.insert(threadId)
+            } else {
+                await syncThreadHistory(threadId: threadId, force: true)
+            }
             if !failedThreadIDs.contains(threadId) {
                 markReadyIfUnread(threadId: threadId)
             }

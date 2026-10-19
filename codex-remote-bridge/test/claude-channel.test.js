@@ -104,6 +104,24 @@ test('snapshot pages preserve ordering and bounded payloads', t => {
   assert.equal(new Set([...older.messages, ...recent.messages].map(m => m.id)).size, 45);
   assert.throws(() => f.store.submit(f.message(randomUUID(), 'a'.repeat(32769))), /too long/);
 });
+
+test('session overview returns lightweight project and reply metadata without message bodies', t => {
+  const f = fixture(t);
+  for (let i = 0; i < 100; i++) f.store.insertMessage(randomUUID(), f.id, 'user', 'private body '.repeat(100), 'phone');
+  const initial = f.store.list().data[0];
+  assert.equal(initial.lastAssistantSeq, 0);
+  assert.equal(typeof initial.cwd, 'string');
+  f.store.insertMessage('reply-overview', f.id, 'assistant', 'private reply '.repeat(100), 'mac');
+  const first = f.store.list().data[0];
+  assert(first.lastAssistantSeq > 0);
+  f.store.insertMessage('later-user', f.id, 'user', 'next request', 'phone');
+  f.store.heartbeat(f.id, f.generation);
+  const next = f.store.list().data[0];
+  assert.equal(next.lastAssistantSeq, first.lastAssistantSeq, 'heartbeats and user messages do not create unread completions');
+  assert.equal(next.lastAssistantSeq, f.store.snapshot(f.id).messages.find(m => m.id === 'reply-overview').seq);
+  assert(JSON.stringify(next).length < 1000);
+  assert(!JSON.stringify(next).includes('private'));
+});
 test('UserPromptSubmit channel echoes do not duplicate the phone message or swallow a Mac prompt', t => {
   const f = fixture(t), command = f.message();
   f.store.submit(command); f.store.claim(f.id, f.generation);

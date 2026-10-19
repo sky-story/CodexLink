@@ -5,6 +5,59 @@
 // Output: Library/Caches/connection-trace.jsonl, pulled from the device with devicectl.
 
 import Foundation
+import CryptoKit
+
+#if DEBUG
+// Opt-in, single-thread recovery evidence. Launch with
+// -CodexLinkMessageSyncTraceThread <threadID>. Stores hashes/order/timestamps only;
+// no transcript text, raw identifiers, attachments, or Keychain material is exported.
+// Normal launches do no work. Output: Library/Caches/message-sync-trace.jsonl.
+enum MessageSyncTrace {
+    private static let target = UserDefaults.standard.string(forKey: "CodexLinkMessageSyncTraceThread")
+    private static let queue = DispatchQueue(label: "com.codexlink.message-sync.trace", qos: .utility)
+    private static let fileURL: URL = {
+        let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("message-sync-trace.jsonl")
+        try? FileManager.default.removeItem(at: url)
+        return url
+    }()
+
+    static func isEnabled(for threadId: String) -> Bool {
+        target?.isEmpty == false && target == threadId
+    }
+
+    static func record(threadId: String, phase: String, messages: [CodexMessage], projected: [CodexMessage] = []) {
+        guard isEnabled(for: threadId) else { return }
+        let url = fileURL
+        let timestamp = Date().timeIntervalSince1970
+        queue.async {
+            let rows: [[String: Any]] = messages.map { message in
+                ["row": digest(message.id), "item": digest(message.itemId ?? ""),
+                 "turn": digest(message.turnId ?? ""), "role": message.role.rawValue,
+                 "kind": message.kind.rawValue, "textSHA256": digest(message.text),
+                 "textBytes": message.text.utf8.count, "createdAt": message.createdAt.timeIntervalSince1970,
+                 "streaming": message.isStreaming, "delivery": message.deliveryState.rawValue,
+                 "order": message.orderIndex]
+            }
+            let record: [String: Any] = ["at": timestamp, "phase": phase, "messages": rows,
+                                       "projectedRows": projected.map { digest($0.id) }]
+            guard var data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]) else { return }
+            data.append(0x0A)
+            if !FileManager.default.fileExists(atPath: url.path) {
+                try? data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
+            } else if let handle = try? FileHandle(forWritingTo: url) {
+                defer { try? handle.close() }
+                handle.seekToEndOfFile()
+                handle.write(data)
+            }
+        }
+    }
+
+    nonisolated private static func digest(_ value: String) -> String {
+        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+}
+#endif
 
 final class ConnectionTrace: @unchecked Sendable {
     static let shared = ConnectionTrace()

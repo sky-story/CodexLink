@@ -563,7 +563,7 @@ extension CodexService {
         clearRunningThreadWatch(threadId)
         let wasAlreadyReady = readyThreadIDs.contains(threadId)
         clearOutcomeBadge(for: threadId)
-        guard activeThreadId != threadId else {
+        guard activeThreadId != threadId || !isCodexTimelineVisible || !isAppInForeground else {
             return
         }
         readyThreadIDs.insert(threadId)
@@ -577,7 +577,7 @@ extension CodexService {
     func markFailedIfUnread(threadId: String) {
         clearRunningThreadWatch(threadId)
         clearOutcomeBadge(for: threadId)
-        guard activeThreadId != threadId else {
+        guard activeThreadId != threadId || !isCodexTimelineVisible || !isAppInForeground else {
             return
         }
         failedThreadIDs.insert(threadId)
@@ -934,11 +934,7 @@ extension CodexService {
                     hydratedThreadIDs.insert(threadId)
                     return .skippedForRunningThread
                 }
-                if merged != existingMessages {
-                    messagesByThread[threadId] = merged
-                    persistMessages()
-                    updateCurrentOutput(for: threadId)
-                }
+                applyHistoryMerge(merged, baseline: existingMessages, threadId: threadId)
                 if usedRecentWindow {
                     outcome = .loadedRecentWindow
                     if !threadHasActiveOrRunningTurn(threadId) {
@@ -1005,54 +1001,39 @@ extension CodexService {
         threadId: String,
         turnId: String?,
         text: String,
-        fileMentions: [String] = []
+        fileMentions: [String] = [],
+        itemId: String? = nil,
+        createdAt: Date? = nil,
+        attachments: [CodexImageAttachment] = []
     ) {
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedIncomingText = Self.normalizedMessageText(trimmedText)
-        guard !trimmedText.isEmpty else {
+        guard !trimmedText.isEmpty || !attachments.isEmpty else {
             return
         }
-
-        if let existingIndex = messagesByThread[threadId]?.lastIndex(where: { candidate in
-            candidate.role == .user
-                && Self.normalizedMessageText(candidate.text) == normalizedIncomingText
-                && (
-                    (turnId != nil && (candidate.turnId == nil || candidate.turnId == turnId))
-                        || (turnId == nil && candidate.turnId == nil)
-                )
-        }) {
-            var didMutate = false
-            if messagesByThread[threadId]?[existingIndex].deliveryState != .confirmed {
-                messagesByThread[threadId]?[existingIndex].deliveryState = .confirmed
-                didMutate = true
-            }
-            if messagesByThread[threadId]?[existingIndex].turnId == nil {
-                messagesByThread[threadId]?[existingIndex].turnId = turnId
-                didMutate = true
-            }
-            // Optional chaining turns `isEmpty` into `Bool?`, so compare explicitly here.
-            if messagesByThread[threadId]?[existingIndex].fileMentions.isEmpty == true, !fileMentions.isEmpty {
-                messagesByThread[threadId]?[existingIndex].fileMentions = fileMentions
-                didMutate = true
-            }
-            guard didMutate else {
-                return
-            }
+        let incoming = CodexMessage(
+            threadId: threadId, role: .user, text: trimmedText,
+            fileMentions: fileMentions, createdAt: createdAt ?? Date(),
+            turnId: turnId, itemId: Self.normalizedHistoryIdentifier(itemId),
+            deliveryState: .confirmed, attachments: attachments
+        )
+        let existing = messagesByThread[threadId] ?? []
+        let exactIndex = incoming.itemId.flatMap { itemId in
+            existing.firstIndex { $0.role == .user && $0.turnId == turnId && $0.itemId == itemId }
+        }
+        let compatibleIndex = Self.uniqueUserHistoryMergeIndex(in: existing, message: incoming, turnId: turnId ?? "")
+        if let index = exactIndex ?? compatibleIndex
+            ?? Self.uniquePendingUserHistoryMergeIndex(in: existing, message: incoming) {
+            var confirmed = reconcileExistingMessage(existing[index], with: incoming)
+            if createdAt == nil { confirmed.createdAt = existing[index].createdAt }
+            if !trimmedText.isEmpty { confirmed.text = trimmedText }
+            if confirmed.fileMentions.isEmpty { confirmed.fileMentions = fileMentions }
+            guard confirmed != existing[index] else { return }
+            messagesByThread[threadId]?[index] = confirmed
             persistMessages()
             updateCurrentOutput(for: threadId)
             return
         }
-
-        appendMessage(
-            CodexMessage(
-                threadId: threadId,
-                role: .user,
-                text: trimmedText,
-                fileMentions: fileMentions,
-                turnId: turnId,
-                deliveryState: .confirmed
-            )
-        )
+        appendMessage(incoming)
     }
 
     // Appends a system message in the current thread timeline.

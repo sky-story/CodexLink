@@ -50,12 +50,38 @@ extension CodexService {
     }
 
     func listThreads(limit: Int? = nil) async throws {
+        while let existing = threadListRefreshTask {
+            let sameLimit = threadListRefreshLimit == limit
+            try await existing.value
+            if sameLimit { return }
+        }
+        try Task.checkCancellation()
+        let generation = connectionGeneration
+        let token = UUID()
+        threadListRefreshToken = token
+        threadListRefreshLimit = limit
         isLoadingThreads = true
-        defer { isLoadingThreads = false }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                if self.threadListRefreshToken == token {
+                    self.threadListRefreshTask = nil
+                    self.threadListRefreshToken = nil
+                    self.isLoadingThreads = false
+                }
+            }
+            try await self.refreshThreadListSnapshot(limit: limit, generation: generation)
+        }
+        threadListRefreshTask = task
+        try await task.value
+    }
 
+    private func refreshThreadListSnapshot(limit: Int?, generation: UInt64) async throws {
         let activeLimit = limit ?? recentActiveThreadListLimit
         let archivedLimit = limit ?? recentArchivedThreadListLimit
         let activeThreads = try await fetchServerThreads(limit: activeLimit)
+        try Task.checkCancellation()
+        guard generation == connectionGeneration else { throw CodexServiceError.disconnected }
 
         var archivedThreads: [CodexThread] = []
         do {
@@ -64,6 +90,8 @@ extension CodexService {
             debugSyncLog("thread/list archived fetch failed (non-fatal): \(error.localizedDescription)")
         }
 
+        try Task.checkCancellation()
+        guard generation == connectionGeneration else { throw CodexServiceError.disconnected }
         reconcileLocalThreadsWithServer(activeThreads, serverArchivedThreads: archivedThreads)
 
         if activeThreadId == nil {
@@ -909,11 +937,8 @@ extension CodexService {
                         // Forced resumes are used when reopening a running thread, so merge the
                         // latest snapshot even mid-run and let mergeHistoryMessages preserve
                         // existing streaming rows instead of waiting for the final block.
-                        if (shouldForceMerge || !threadHasActiveOrRunningTurn(threadId) || existingMessages.isEmpty)
-                            && merged != existingMessages {
-                            messagesByThread[threadId] = merged
-                            persistMessages()
-                            updateCurrentOutput(for: threadId)
+                        if shouldForceMerge || !threadHasActiveOrRunningTurn(threadId) || existingMessages.isEmpty {
+                            applyHistoryMerge(merged, baseline: existingMessages, threadId: threadId)
                         }
                         if usedRecentWindow, !threadHasActiveOrRunningTurn(threadId) {
                             scheduleCanonicalHistoryReconcileIfNeeded(for: threadId)

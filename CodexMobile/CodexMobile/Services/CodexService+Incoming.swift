@@ -1815,6 +1815,28 @@ extension CodexService {
         itemType: String,
         isCompleted: Bool
     ) -> Bool {
+        if itemType == "usermessage"
+            || (itemType == "message" && itemObject["role"]?.stringValue?.lowercased() == "user") {
+            let turnId = extractTurnID(from: paramsObject)
+            guard let threadId = resolveThreadID(from: paramsObject, turnIdHint: turnId) else {
+                return true
+            }
+            if let turnId { threadIdByTurnID[turnId] = threadId }
+            appendConfirmedMirroredUserMessage(
+                threadId: threadId,
+                turnId: turnId,
+                text: decodeItemText(from: itemObject),
+                itemId: extractItemID(
+                    from: paramsObject,
+                    eventObject: envelopeEventObject(from: paramsObject),
+                    itemObject: itemObject
+                ),
+                createdAt: decodeHistoryTimestamp(from: itemObject),
+                attachments: decodeImageAttachments(from: itemObject)
+            )
+            return true
+        }
+
         guard itemType == "reasoning"
             || itemType == "filechange"
             || itemType == "toolcall"

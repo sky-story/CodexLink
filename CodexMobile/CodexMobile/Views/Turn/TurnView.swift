@@ -84,7 +84,7 @@ struct TurnView: View {
             gitWorkingDirectory: gitWorkingDirectory
         )
         let disabledGitActions: Set<TurnGitActionKind> = viewModel.canCreatePullRequest ? [] : [.createPR]
-        let onTapMacHandoff: (() -> Void)? = codex.isConnected && (codex.supportsMacTerminalOpen || (!codex.supportsSharedSessionControl && codex.supportsDesktopAppHandoff)) ? {
+        let onTapMacHandoff: (() -> Void)? = codex.isConnected && (codex.supportsMacTerminalOpen || (!codex.usesSharedSessionComposer && codex.supportsDesktopAppHandoff)) ? {
             if codex.supportsMacTerminalOpen {
                 openInMacTerminal()
             } else {
@@ -121,7 +121,7 @@ struct TurnView: View {
                 isComposerFocused: isInputFocused,
                 isComposerAutocompletePresented: isComposerAutocompletePresented,
                 emptyState: resolvedEmptyConversationState,
-                composer: codex.supportsSharedSessionControl
+                composer: codex.usesSharedSessionComposer
                     ? AnyView(SharedSessionComposer(threadID: thread.id))
                     : AnyView(composerWithSubagentAccessory(
                     currentThread: resolvedThread,
@@ -182,7 +182,7 @@ struct TurnView: View {
                 isRunningGitAction: viewModel.isRunningGitAction,
                 showsDiscardRuntimeChangesAndSync: viewModel.shouldShowDiscardRuntimeChangesAndSync,
                 gitSyncState: viewModel.gitSyncState,
-                macOpenTitle: codex.supportsSharedSessionControl ? "在 Mac 打开此会话（iTerm）" : "Continue on Desktop App",
+                macOpenTitle: codex.usesSharedSessionComposer ? "在 Mac 打开此会话（iTerm）" : "Continue on Desktop App",
                 onTapMacHandoff: onTapMacHandoff,
                 onTapWorktreeHandoff: onTapWorktreeHandoff,
                 onTapNewChat: onTapNewChat,

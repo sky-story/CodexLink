@@ -33,16 +33,17 @@ struct SharedSessionComposer: View {
                     .accessibilityIdentifier("shared-thread-\(threadID)")
                 Spacer()
                 Button("停止", role: .destructive) { send("interrupt") }
-                    .disabled(!codex.threadHasActiveOrRunningTurn(threadID) || sending || !codex.isConnected)
+                    .disabled(!codex.threadHasActiveOrRunningTurn(threadID) || sending || !canControl)
                 Button(mode == "steer" ? "Steer" : "Queue") { send(mode) }
                     .buttonStyle(.borderedProminent)
-                    .disabled(sending || updatingSettings || !codex.isConnected || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(sending || updatingSettings || !canControl || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             if let error { Text(error).font(.caption).foregroundStyle(.red) }
         }
         .padding(12).background(.regularMaterial)
 
-        .task(id: codex.isConnected) {
+        .task(id: "\(threadID)-\(canControl)") {
+            guard canControl else { return }
             await ConnectionTrace.shared.measure("recover_shared_control") { await codex.recoverSharedControl(threadID: threadID) }
             if codex.isConnected && codex.availableModels.isEmpty { try? await codex.listModels() }
         }
@@ -50,12 +51,13 @@ struct SharedSessionComposer: View {
             if phase == .active { Task { await codex.refreshSharedSettings(threadID: threadID) } }
         }
     }
+    private var canControl: Bool { codex.isConnected && codex.isInitialized && codex.supportsSharedSessionControl }
     private var settings: SharedSessionSettings? { codex.sharedSessionSettings[threadID] }
     private var selectedModel: CodexModelOption? {
         codex.availableModels.first { $0.model == settings?.model }
     }
     private var settingsDisabled: Bool {
-        !codex.isConnected || !codex.supportsSharedSessionSettings || updatingSettings || sending
+        !canControl || !codex.supportsSharedSessionSettings || updatingSettings || sending
     }
 
     private var settingsControls: some View {
@@ -106,7 +108,7 @@ struct SharedSessionComposer: View {
             }
             Text(!codex.isConnected ? "离线 · 显示上次读取的配置" : "修改用于后续任务及待执行队列；不会改变当前执行中的任务。")
                 .font(.caption2).foregroundStyle(.secondary)
-            if !codex.supportsSharedSessionSettings && codex.isConnected {
+            if !codex.supportsSharedSessionSettings && codex.isConnected && codex.isInitialized {
                 Text("更新 Mac Bridge 后可修改配置").font(.caption2).foregroundStyle(.secondary)
             }
             if let message = codex.sharedSettingsError[threadID] ?? codex.modelsErrorMessage {

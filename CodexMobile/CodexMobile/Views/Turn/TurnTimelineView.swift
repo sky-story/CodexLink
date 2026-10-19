@@ -551,7 +551,10 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
                 GeometryReader { viewport in
                     let contentWidth = timelineContentWidth(for: viewport.size.width)
                     ScrollView(.vertical) {
-                        VStack(spacing: 20) {
+                        // Only lay out the visible rows. Eagerly measuring the whole
+                        // recent page repeatedly shapes offscreen Markdown/CJK text
+                        // on the main thread and stalls drawer gestures during updates.
+                        LazyVStack(spacing: 20) {
                             TurnTimelineRowsSection(
                                 shouldWarmRecentTailProgressively: shouldWarmRecentTailProgressively,
                                 hasEarlierMessages: hasEarlierMessages,
@@ -580,7 +583,7 @@ struct TurnTimelineView<EmptyState: View, Composer: View>: View {
                         .padding(.bottom, 12)
 
                         // Keep bottom anchor outside the message stack so it is always
-                        // reachable by scrollTo regardless of VStack layout timing.
+                        // reachable by scrollTo while lazy row sizes settle.
                         Color.clear
                             .frame(width: contentWidth, height: 1)
                             .padding(.horizontal, timelineHorizontalPadding)

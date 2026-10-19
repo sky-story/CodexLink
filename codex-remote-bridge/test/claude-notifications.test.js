@@ -78,7 +78,7 @@ test('native prompt IDs deduplicate replayed starts and separate equal prompts a
   }
   await drain(t, stateDir, sent); assert.equal(sent.length, 2);
 });
-test('background progress stays silent while responses, API errors, approvals and questions notify', async t => {
+test('responses with background work, API errors, approvals and questions notify without private content', async t => {
   const stateDir = fixture(t), sent = [];
   const record = input => recordClaudeHook(input, { stateDir });
   record(hook('UserPromptSubmit'));
@@ -93,22 +93,30 @@ test('background progress stays silent while responses, API errors, approvals an
   assert.deepEqual(sent.map(p => p.title), ['Claude · 等待审批', 'Claude · 需要补充信息', 'Claude · 本轮已回复', 'Claude · API 错误']);
   assert(!JSON.stringify(sent).includes('PRIVATE')); assert(!sent.some(p => p.title.includes('任务已完成')));
 });
-test('background tasks and scheduled wakeups do not notify; the later idle response notifies once', async t => {
+test('persistent monitors and scheduled tasks do not suppress main-agent replies; each turn notifies once', async t => {
   const stateDir = fixture(t), sent = [];
-  await collect(stateDir, hook('UserPromptSubmit'));
+  let turnCount = 0;
   for (const fields of [
+    { background_tasks: [{ id: 'monitor', type: 'monitor', status: 'running', command: 'PRIVATE LISTENER' }], session_crons: [] },
     { background_tasks: [{ id: 'shell', status: 'running', command: 'PRIVATE COMMAND' }], session_crons: [] },
     { background_tasks: [], session_crons: [{ id: 'cron', recurring: true, prompt: 'PRIVATE PROMPT' }] },
     { session_crons: [{ id: 'wake-once', recurring: false }] },
   ]) {
-    assert.deepEqual(await collect(stateDir, hook('Stop', fields)), { code: 0, stdout: '', stderr: '' });
+    const prompt_id = `prompt-${++turnCount}`;
+    await collect(stateDir, hook('UserPromptSubmit', { prompt_id }));
+    const stop = hook('Stop', { ...fields, prompt_id, last_assistant_message: 'PRIVATE FINISHED RESPONSE' });
+    const results = await Promise.all(Array.from({ length: 3 }, () => collect(stateDir, stop)));
+    for (const result of results) assert.deepEqual(result, { code: 0, stdout: '', stderr: '' });
     await drain(t, stateDir, sent);
-    assert.equal(sent.length, 0);
+    assert.equal(sent.length, turnCount, 'The response must notify even while background activities persist');
+    // Ending the monitor or waking up again must not resend this same response.
+    await collect(stateDir, hook('Stop', { prompt_id, background_tasks: [], session_crons: [] }));
+    await collect(stateDir, stop);
+    await drain(t, stateDir, sent);
+    assert.equal(sent.length, turnCount);
   }
-  await collect(stateDir, hook('Stop', { background_tasks: [], session_crons: [] }));
-  await collect(stateDir, hook('Stop', { background_tasks: [], session_crons: [] }));
-  await drain(t, stateDir, sent);
-  assert.deepEqual(sent.map(p => p.title), ['Claude · 本轮已回复']);
+  assert(sent.every(p => p.title === 'Claude · 本轮已回复'));
+  assert(!JSON.stringify(sent).includes('PRIVATE'));
 });
 test('upgrading the outbox silences legacy background writers without stopping their CLI sessions', async t => {
   const stateDir = fixture(t), sent = [];

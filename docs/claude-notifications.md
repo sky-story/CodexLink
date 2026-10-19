@@ -47,8 +47,7 @@ node scripts/claude-notifications.cjs uninstall
 
 | 事件 | 提醒 | 含义 |
 | --- | --- | --- |
-| Claude `Stop`，未报告后台任务或计划唤醒 | Claude · 本轮已回复 | 主会话本轮输出结束，不宣称整个项目已完成 |
-| `Stop` 带后台任务或计划唤醒 | 不推送 | 仍在等待任务或后续唤醒，后台进度保持静默 |
+| 主会话 Claude `Stop`，包括仍有后台任务或计划唤醒 | Claude · 本轮已回复 | 主会话本轮输出结束，不宣称整个项目或后台任务已完成 |
 | Claude `StopFailure` | Claude · API 错误 | 模型请求错误导致本轮结束 |
 | Claude `PermissionRequest` | Claude · 等待审批 | 请到 Mac 查看操作并审批 |
 | `AskUserQuestion` 的 `PreToolUse` | Claude · 需要补充信息 | 请到 Mac 回答问题 |
@@ -56,7 +55,7 @@ node scripts/claude-notifications.cjs uninstall
 
 `SessionStart` 和 `UserPromptSubmit` 只维护本地会话/轮次身份，不发通知。子代理完成、普通工具执行完成、会话退出不会被当成主任务完成。Claude 的 `Stop` 不覆盖用户手动中断；其他 Stop Hooks 也可能让 Claude 继续执行，因此使用“本轮已回复”。旧版本若不提供后台任务字段，也不会据此声称没有后台任务。
 
-有后台任务、`/loop`、`CronCreate` 或其他计划唤醒时，不再发送“后台仍有任务”提醒。后续 `Stop` 不再报告这些活动时，正常回复提醒可以发送；审批、补充信息和 API 错误仍会单独提醒。只要计划任务仍存在，即使暂时没有后台工具执行，本轮回复也保持静默。
+后台任务、常驻 Monitor、`/loop`、`CronCreate` 或其他计划唤醒可以跨越多轮回复，不能用它们是否存在来判断主会话有没有回复完。主会话 `Stop` 正常发送“本轮已回复”，同一会话同一轮的重复 `Stop` 只提醒一次；后台活动后来结束也不会补发同一轮提醒。仍不单独发送“后台仍有任务”进度提醒，子代理完成也不触发主会话回复通知。审批、补充信息和 API 错误仍会单独提醒。
 
 Claude 的 `PermissionRequest` 没有稳定的 `tool_use_id`，同一轮内相同工具和参数的重复审批会合并为一次提醒。它也不覆盖所有种类的对话框，例如沙箱网络授权。本版是通知观察器，**不返回任何批准、拒绝或继续执行的决定**。
 
@@ -76,6 +75,8 @@ Claude 的 `PermissionRequest` 没有稳定的 `tool_use_id`，同一轮内相�
 ## 验收
 
 已由用户确认：手动「Claude · 通知测试」和真实 Claude 回复结束后自动触发的「Claude · 本轮已回复」均可在 iPhone 锁屏时收到。真实任务验证使用新开的普通 Claude CLI 会话，要求仅回复短文本、不调用工具或修改文件。Codex 与 Claude 同时完成、审批提醒和网络中断后的锁屏显示仍需单独验收。
+
+2026-10-19 修复了常驻后台任务导致主会话回复通知被误抑制的问题。34 项相关测试、隔离的真实 Claude CLI 验证，以及本机已安装 Hook 的临时状态验证均通过。更新后，17:37:15 自然触发的一条回复通知被 Bark 接受，用户随后确认 iPhone 已收到。这是本次修复后的真实收件验证；当时手机是否锁屏未单独确认。具体证据边界见 [验证记录](validation.md#claude-replies-with-persistent-background-work-2026-10-19)。
 
 自动化测试：
 

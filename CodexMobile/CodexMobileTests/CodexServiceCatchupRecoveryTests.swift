@@ -332,6 +332,7 @@ final class SharedSessionSettingsTests: XCTestCase {
         service.supportsSharedSessionControl = true
         service.supportsSharedSessionSettings = true
         service.isConnected = true
+        service.isInitialized = true
         return service
     }
 

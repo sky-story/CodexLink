@@ -327,15 +327,26 @@ final class CodexService {
     var sharedSettingsRevision: [String: Int] = [:]
     var sharedSettingsError: [String: String] = [:]
     var supportsSharedSessionControl = false
+    // Keep the same composer (and its unsent draft) mounted during a transient disconnect.
+    var lastNegotiatedSharedSession = false
     var supportsClaudeChannels = false
     var sharedControlStatus: [String: String] = [:]
     var sharedQueueText: [String: [String]] = [:]
     var isInitialized = false
+    // Invalidates replies and read-side work belonging to a retired connection.
+    @ObservationIgnored var connectionGeneration: UInt64 = 0
+    @ObservationIgnored var threadListRefreshTask: Task<Void, Error>?
+    @ObservationIgnored var threadListRefreshToken: UUID?
+    @ObservationIgnored var threadListRefreshLimit: Int?
+    @ObservationIgnored var pendingImmediateSyncTask: Task<Void, Never>?
+    @ObservationIgnored var pendingImmediateSyncThreadID: String?
+    @ObservationIgnored var pendingImmediateSyncToken: UUID?
     var isLoadingThreads = false
     // Tracks the non-blocking bootstrap that hydrates chats/models after the socket is ready.
     var isBootstrappingConnectionSync = false
     var currentOutput = ""
     var activeThreadId: String?
+    var isCodexTimelineVisible = true
     var activeTurnId: String?
     var activeTurnIdByThread: [String: String] = [:]
 
@@ -935,7 +946,7 @@ final class CodexService {
 
     // Separates transport readiness from post-connect hydration so the UI can explain delays honestly.
     var connectionPhase: CodexConnectionPhase {
-        if isConnecting {
+        if isConnecting || (isConnected && !isInitialized) {
             return .connecting
         }
 

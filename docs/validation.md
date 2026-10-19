@@ -6,6 +6,8 @@ This public summary reports the maintainer's local results. Raw device records, 
 
 ## Physical-device checks
 
+The session-overview and recovery changes dated 2026-10-18 passed source and simulator checks, followed by a physical installation and trusted reconnection check. Complete overview interactions on the phone remain pending; that deployment check does not extend the interaction claims in this table.
+
 | Scenario | Observed result | Boundary |
 | --- | --- | --- |
 | Observe Mac CLI | Original running TUI output visible on iPhone | Same shared daemon and socket required |
@@ -23,6 +25,18 @@ This public summary reports the maintainer's local results. Raw device records, 
 ## Automated checks and builds
 
 Results below are from separate runs and **must not be added together as distinct tests**. The latest changes were tested selectively; earlier complete-suite counts are historical.
+
+### Message synchronization recovery (2026-10-19)
+
+Phone screenshots showed a reply preceding its question and older replies missing. Read-only daemon history and the Bridge event ledger contained the complete items in the correct turn order. The current daemon successfully read this paginated thread; the older `list_turns` limitation did not explain this incident.
+
+The iOS fixes handle modern user item lifecycle events, reconcile stable identities without collapsing distinct repeated sends, restore server turn/item order during history backfill, and parse turn `startedAt` timestamps. Detached history commits now rebase concurrent live additions, text changes, and terminal states at both read and resume call sites. Recent-window recovery checks that skipped chat identities are complete and ordered before trusting the cached prefix. This does not sort the transcript by wall-clock timestamps.
+
+Three original regressions failed before the changes. A fourth deterministic regression reproduced an old history commit dropping a new reply and reverting a completed message to partial streaming text. Ten new tests cover these paths plus image-only input, repeated sends, in-turn steer, partial history, concurrent discovery/deletion, clock drift, and older missing replies outside the recent window. The final selected run passed **173 tests, 0 failures**. It excluded **21 pre-existing failing tests** independently reproduced against an isolated copy of the exact pre-change sources; this is not a claim that the full iOS suite passes. An intermediate pending-message ordering regression was corrected and is included in the passing final run.
+
+A signed iPhone build and code-signature verification passed. After the user reconnected the phone, the original encrypted cache was backed up again and the build was installed over the existing app. The phone completed its trusted handshake and synchronization. A device-side trace verified **27 user/assistant items across all three completed turns** against read-only daemon history: each appeared exactly once, all text hashes matched, and both stored order and render-projection order matched the canonical sequence. Turn timestamps also matched. This includes all eight messages from the two turns shown in the original screenshots; the captured pre-merge phone order was wrong and the post-merge order was correct.
+
+Signing configuration and pairing-state hashes remain unchanged. No Bridge restart or model prompt was issued for this fix. The opt-in DEBUG trace (`-CodexLinkMessageSyncTraceThread <threadID>`) records message/identity hashes, order, timestamps, and projected row hashes; it exports no transcript text or Keychain material. The app was then relaunched without diagnostic arguments, and the trace remained unchanged. **Physical transcript and render-projection recovery are verified; direct visual confirmation by the user remains pending.** No screenshot was obtained, and these results do not establish all scrolling, pagination, or repeated-disconnect scenarios.
 
 | Check | Recorded result |
 | --- | --- |
@@ -113,6 +127,51 @@ The user sent a second phone test explicitly requesting the Channel reply tool. 
 
 ## Quiet Claude background notifications
 
-The user reported repeated “Claude · 后台仍有任务” alerts while work was still running. The local ledger confirmed four provider-accepted background alerts over about two minutes. The observer now keeps `Stop` events with background tasks or scheduled wakeups silent, while preserving later idle-response, permission, input, and error notifications. The title “本轮已回复” remains deliberate: a Stop event does not prove the user's whole goal is complete.
+The user reported repeated “Claude · 后台仍有任务” alerts while work was still running. The local ledger confirmed four provider-accepted background alerts over about two minutes. That change kept `Stop` events with background tasks or scheduled wakeups silent, while preserving later idle-response, permission, input, and error notifications. This broad Stop suppression was superseded by the 2026-10-19 correction below; the separate policy suppressing legacy background-progress notices remains. The title “本轮已回复” remains deliberate: a Stop event does not prove the user's whole goal is complete.
 
-All **29 focused notification, Bark, and installer tests passed**. Three affected assertions failed against the preceding implementation. Coverage includes repeated background pauses, recurring and one-shot wakeups, a later idle reply sent once, preserving Codex notifications, and an already-open legacy database writer across migration. An additional isolated probe used the previously installed Hook runtime and sender: zero background sends, one later idle-response send, and no real push. The shared outbox policy was applied locally, notification Hooks were updated for future sessions, unrelated Claude settings were verified unchanged, and existing Claude CLI sessions were not restarted. Already accepted or uncertain historical deliveries were preserved. A notification already claimed before the migration cannot be recalled; post-update physical observation remains separate evidence.
+All **29 focused notification, Bark, and installer tests passed** at that checkpoint. Three affected assertions failed against the preceding implementation. Coverage included repeated background pauses, recurring and one-shot wakeups, a later idle reply sent once, preserving Codex notifications, and an already-open legacy database writer across migration. An additional isolated probe used the previously installed Hook runtime and sender: zero background sends, one later idle-response send, and no real push. The shared outbox policy was applied locally, notification Hooks were updated for future sessions, unrelated Claude settings were verified unchanged, and existing Claude CLI sessions were not restarted. Already accepted or uncertain historical deliveries were preserved. A notification already claimed before the migration cannot be recalled; post-update physical observation remained separate evidence.
+
+## Claude replies with persistent background work (2026-10-19)
+
+The quiet-background change also suppressed normal main-agent replies whenever `background_tasks` or `session_crons` was nonempty. A persistent Monitor or listener could therefore prevent every response notification, even after foreground work finished. Main-agent `Stop` now queues `response_ready` independently of that metadata. Per-session/per-turn deduplication, exclusion of subagent Stops, and the database policy silencing legacy `background` notices are unchanged.
+
+The new regression failed against the preceding source with zero sends for a persistent Monitor. After the fix, **34 focused notification, Bark, attention, and installer tests passed**, with temporary state and the mock Keychain. They cover persistent monitors, running shell tasks, recurring and one-shot scheduled wakeups, concurrent hook invocations, and repeated Stops. An isolated real Claude CLI completed against the loopback fixture API and produced one response-ready notice and one mocked send; no real model provider or physical push participated.
+
+To preserve already-open Claude sessions, only the notification module at the existing pinned Hook path was replaced atomically, with its original bytes backed up. Claude launches a fresh Hook process for each event, so the next invocation at that path reads the updated module. A copy of the installed runtime was first checked with an already-started turn and just this module overlaid. The actual installed path then passed the same isolated checks: 11 silent, successful Hook invocations, two turns yielding exactly two mocked sends, and no extra sends from duplicate or subagent Stops. This is a deliberate local one-file hotfix inside a normally immutable runtime snapshot; its directory revision was retained, and the replacement SHA-256 was recorded separately.
+
+The runtime manifest confirmed that only this one module changed among 3,537 files. Both observed Claude processes, the Codex processes, and Bridge retained their PIDs and start times. Claude settings, Bark configuration, pairing, daemon configuration, and signing-file hashes were unchanged; the Bridge remained running and connected. No prompt, approval, interrupt, service restart, or phone installation was issued. Local backups and evidence are under `.build/claude-notification-fix-20261019/`.
+
+After deployment at 09:35:58 UTC, a read-only production-ledger check observed one naturally generated Claude `response_ready` notice at **09:37:15 UTC (17:37:15 local)** with status `accepted`. No synthetic event was inserted into production and no test push was sent. The user subsequently confirmed receiving this notification on the iPhone. This establishes one user-confirmed automatic delivery after the hotfix, without restarting the existing Claude CLI sessions. The originating task was not controlled by this check, and the phone's lock state was not separately confirmed. It does not establish repeated delivery across outages or simultaneous completions.
+
+
+## Session overview and connection reliability (2026-10-18)
+
+The complete Bridge suite passed **290 tests**. Coverage includes the frozen v1 handshake through the real phone-facing router, shared-runtime capability consistency, legacy clients, command deduplication, and lightweight Claude summaries without message bodies. All Bridge tests used isolated state and the mock Keychain.
+
+An isolated, unpaired iOS 26.5 simulator passed **29 focused unit tests and one UI navigation test** after the final changes. The unit selection includes 15 new reliability tests plus existing settings, Claude command, and trusted-reconnect tests. Tests verify concurrent list callers share one active/archive request pair, inactive completion needs no transcript download on capable Bridges, retired-connection replies are rejected, both silent and continuously busy initialization can time out, pending requests are restored without replaying commands, and capability reset preserves the shared composer while disabling writes. Overview tests cover provider-separated IDs, attention ordering, offline state, old Claude payloads, and per-Mac reply read markers. The UI test opens a Claude approval view and a Codex Queue composer from the same overview. The overview was also visually inspected using fictional offline data.
+
+An expanded regression selection initially ran 53 unit tests: 48 passed and five failed. An isolated checkout of the unchanged baseline `db4d58e` reproduced exactly the same five failures: four in `CodexServiceConnectionErrorTests` (connection copy and error suppression) and one in `CodexServiceThreadListTests` (updated/created ordering). These remain pre-existing gaps; the complete iOS suite is not claimed to pass. Counts from overlapping selections must not be added.
+
+The simulator build succeeded. The local signing settings and Info.plist match their pre-change baseline; the Xcode project only adds registration for the new test file.
+
+After the user connected the physical iPhone for installation, a signed device build succeeded and was installed over the existing app with the same bundle identifier. The Bridge was updated through the existing service manager; its installed production files match the source. The original Codex daemon, two observed Codex processes and two Claude processes retained their PIDs and start times. Pairing and signing-file hashes remained unchanged, and exactly one private Relay listener was present. No agent task, approval or interruption was sent for this deployment check.
+
+The updated iPhone app successfully resolved its existing trusted pairing, completed the secure handshake and initialized in about 2.27 seconds; the connection was ready about 3.33 seconds after app launch. It loaded 67 threads and completed post-connect sync. The temporary timing trace was then disabled by relaunching the phone app. These observations verify one physical reconnect after installation, not a controlled latency comparison. Physical multi-session overview interaction and battery improvements still require device acceptance; no measured device performance gain is claimed. Local deployment evidence is retained under `.build/herdr-adoption/`.
+
+## Sidebar responsiveness (2026-10-18)
+
+After the user reported lag when opening the sidebar, a physical-device Time Profiler recording identified expensive main-thread layout of offscreen Chinese Markdown in the conversation timeline. The recent page used an eager `VStack` for up to 40 messages. It now uses `LazyVStack` so offscreen rows do not all require immediate layout. Sidebar grouping itself accounted for little of the sampled work.
+
+Two live recordings of approximately 55 seconds each produced these results:
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| Hangs longer than 250 ms | 27 | 0 |
+| Main-thread CPU sample time | 16,818 ms | 5,361 ms |
+| Markdown block layout sample time | 5,150 ms | 449 ms |
+
+These were natural interactions, not identical scripted replays. The results demonstrate improvement in the observed samples, not a guaranteed speedup or elimination of every stall. CPU sample times are not individual gesture latencies.
+
+One focused UI regression passed in the dedicated unpaired simulator with 70 fictional threads and 60 long Chinese Markdown messages. It checks repeated sidebar opening/closing, draft retention, remaining in history-reading mode after closing the drawer, and returning to the latest message. All fixture RPCs are intercepted in memory; the scene is compiled only for debug simulator builds.
+
+A signed device build succeeded and was installed over the existing app, then launched with connection tracing disabled. The Bridge was not restarted for this fix. The observed Codex daemon, Codex, Claude, and Bridge processes retained their PIDs and start times, and pairing and signing-file hashes remained unchanged. No agent task, approval, or interruption was sent. Local evidence is retained under `.build/sidebar-lag-20261018/`, including `performance-comparison.json`, `before.trace`, `after.trace`, `sidebar-ui-final.xcresult`, and the installation/process-preservation records.

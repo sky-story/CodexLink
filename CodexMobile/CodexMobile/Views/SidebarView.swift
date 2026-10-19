@@ -18,7 +18,7 @@ struct SidebarView: View {
 
     let onClose: () -> Void
     let onOpenThread: (CodexThread) -> Void
-    var onOpenClaude: (() -> Void)? = nil
+    var onOpenSessions: (() -> Void)? = nil
 
     @State private var searchText = ""
     @State private var isCreatingThread = false
@@ -43,10 +43,10 @@ struct SidebarView: View {
                 onClose: onClose
             )
 
-            if let onOpenClaude {
-                Button(action: onOpenClaude) {
+            if let onOpenSessions {
+                Button(action: onOpenSessions) {
                     HStack {
-                        Label("Claude 会话", systemImage: "terminal")
+                        Label("会话总览", systemImage: "square.stack.3d.up")
                         Spacer()
                         Image(systemName: "chevron.right").font(.caption)
                     }.padding(12)

@@ -39,6 +39,7 @@ Also explore: **[Claude sessions and approvals](#claude-preview)** · **[Codex +
 | Bark lock-screen notifications | Physical test delivery verified; automatic completion accepted by provider; approval lock-screen delivery pending |
 | Claude Code notifications | User confirmed automatic response notification on the locked iPhone; simultaneous Codex/Claude completion and approval delivery pending |
 | Claude sessions and tool approvals | Preview via official Channels; physical iPhone message/reply verified in the same Mac session; approval relay verified on Mac, physical phone approval pending |
+| Codex + Claude session overview | Project grouping and attention/unread states; isolated simulator checks passed, complete physical-device interaction validation pending |
 | Open this session on Mac (iTerm) | Implemented, experimental; full physical-device flow and macOS Automation permissions still need validation |
 
 See the [validation summary](docs/validation.md) and [release readiness](docs/release-readiness.md). These are scoped results, not a claim of production reliability.
@@ -227,7 +228,7 @@ cd /path/to/your/project
 clink                           # New session, named after the current folder
 ```
 
-Confirm **I am using this for local development** when Claude prompts, complete project/MCP consent on Mac, and keep the terminal open. Choose **Claude 会话** in the iPhone sidebar to send messages and read replies. Use separate terminals for separate projects.
+Confirm **I am using this for local development** when Claude prompts, complete project/MCP consent on Mac, and keep the terminal open. Open **会话总览** in the iPhone sidebar and select a Claude session to send messages and read replies. **Claude 接入** in the toolbar keeps the dedicated list and setup instructions available. Use separate terminals for separate projects.
 
 <a id="claude-preview"></a>
 <p align="center">

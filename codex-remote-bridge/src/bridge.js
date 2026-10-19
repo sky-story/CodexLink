@@ -14,6 +14,7 @@ const {
   readBridgeConfig,
 } = require("./codex-desktop-refresher");
 const { createCodexTransport } = require("./codex-transport");
+const { buildClientHandshake } = require("./client-protocol");
 const { createThreadRolloutActivityWatcher } = require("./rollout-watch");
 const { printQR } = require("./qr");
 const { rememberActiveThread } = require("./session-state");
@@ -908,15 +909,13 @@ function startBridge({
 
       sendApplicationResponse(JSON.stringify({
         id: parsed.id,
-        result: {
+        result: buildClientHandshake({
+          mode: codex.mode,
+          endpoint: config.codexEndpoint,
+          platform: process.platform,
           bridgeManaged: true,
           claudeChannels: true,
-          sharedSession: codex.mode === "shared",
-          sessionSettings: codex.mode === "shared",
-          turnStateSnapshot: codex.mode === "shared",
-          controlProtocol: codex.mode === "shared" ? 1 : 0,
-          macTerminalOpen: codex.mode === "shared" && process.platform === "darwin",
-        },
+        }),
       }));
       return true;
     }

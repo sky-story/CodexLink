@@ -57,6 +57,13 @@ extension CodexService {
 
     // Sends an RPC request and waits for the matching response by request id.
     func sendRequest(method: String, params: JSONValue?) async throws -> RPCMessage {
+        let generation = connectionGeneration
+        let response = try await sendRequestOnCurrentConnection(method: method, params: params, generation: generation)
+        guard generation == connectionGeneration else { throw CodexServiceError.disconnected }
+        return response
+    }
+
+    private func sendRequestOnCurrentConnection(method: String, params: JSONValue?, generation: UInt64) async throws -> RPCMessage {
         if let requestTransportOverride {
             return try await requestTransportOverride(method, params)
         }
@@ -87,9 +94,11 @@ extension CodexService {
             pendingRequests[requestKey] = continuation
 
             Task {
+                guard generation == connectionGeneration else { return }
                 do {
                     try await sendMessage(request)
                 } catch {
+                    guard generation == connectionGeneration else { return }
                     if shouldTreatSendFailureAsDisconnect(error) {
                         handleReceiveError(error)
                         return

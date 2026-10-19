@@ -31,13 +31,12 @@ function recordClaudeHook(input, { stateDir, config = loadBarkConfig({ stateDir 
         .run(sessionKey, runKey, label, now());
       let kind, detail;
       if (event === 'Stop') {
-        const background = (Array.isArray(input.background_tasks) && input.background_tasks.length > 0)
-          || (Array.isArray(input.session_crons) && input.session_crons.length > 0);
         // Stop is a response boundary, not proof that the user's entire goal or
         // all background work succeeded. Other Stop hooks may continue the agent.
-        // Waiting for background work or scheduled wakeups is progress, not a
-        // reason to interrupt the owner. A later idle Stop can still notify.
-        if (background) return { status: 'suppressed', kind: 'background' };
+        // Persistent monitors and scheduled tasks can outlive every foreground
+        // response, so their presence must not veto this notification. The run
+        // identity below still coalesces repeated Stops; no background notice is
+        // emitted, and subagent Stops remain excluded above.
         kind = 'response_ready';
         detail = kind;
       } else if (event === 'StopFailure') {

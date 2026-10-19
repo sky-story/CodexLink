@@ -1,0 +1,9 @@
+{
+  "bridgeManaged": true,
+  "claudeChannels": true,
+  "sharedSession": true,
+  "controlProtocol": 1,
+  "sessionSettings": true,
+  "turnStateSnapshot": true,
+  "macTerminalOpen": true
+}

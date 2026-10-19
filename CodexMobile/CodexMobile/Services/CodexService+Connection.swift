@@ -106,7 +106,6 @@ extension CodexService {
                 secureConnectionState = .encrypted
             }
 
-            startSyncLoop()
             // Push registration is best-effort and talks to the bridge, so it must not
             // hold the main connect path hostage when the managed backend is slow.
             Task { @MainActor [weak self] in
@@ -115,6 +114,7 @@ extension CodexService {
             if performInitialSync {
                 schedulePostConnectSyncPass()
             }
+            startSyncLoop()
             Task { @MainActor [weak self] in
                 await self?.refreshBridgeManagedState(
                     allowAvailableBridgeUpdatePrompt: self?.isAppInForeground ?? false
@@ -280,10 +280,11 @@ extension CodexService {
         clearSavedRelaySession()
     }
 
-    // Requests have no per-call deadline, so a relay path that dies without a socket error
-    // used to leave connect waiting forever. Fail only after a silent gap: a Bridge still
-    // replaying a backlog keeps sending frames and is never cut off.
-    func initializeSessionWithInactivityTimeout(silenceLimit: TimeInterval = 15) async throws {
+    // Bound both a silent relay and a busy connection that never finishes initialization.
+    // Backlog traffic extends the silence budget, but never the total readiness budget.
+    func initializeSessionWithInactivityTimeout(silenceLimit: TimeInterval = 15, readinessLimit: TimeInterval = 60) async throws {
+        let startedAt = Date()
+        let generation = connectionGeneration
         lastInboundMessageAt = Date()
         let timeoutError = CodexServiceError.invalidInput(
             "Connection timed out after \(Int(silenceLimit))s without a response from the Mac."
@@ -292,8 +293,10 @@ extension CodexService {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 guard let self, !Task.isCancelled else { return false }
-                if Date().timeIntervalSince(self.lastInboundMessageAt) > silenceLimit {
-                    self.failAllPendingRequests(with: timeoutError)
+                guard generation == self.connectionGeneration else { return false }
+                if let reason = InitializationDeadline.failure(startedAt: startedAt, lastInboundAt: self.lastInboundMessageAt,
+                                                              now: Date(), silenceLimit: silenceLimit, readinessLimit: readinessLimit) {
+                    self.handleReceiveError(reason == .silence ? timeoutError : CodexServiceError.invalidInput("Connection timed out before Mac session recovery completed (\(Int(readinessLimit))s)."))
                     return true
                 }
             }
@@ -313,7 +316,9 @@ extension CodexService {
     }
 
     func initializeSession() async throws {
-        supportsClaudeChannels = false
+        let generation = connectionGeneration
+        isInitialized = false
+        applyBridgeCapabilities(nil)
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0"
         let clientInfo: JSONValue = .object([
             "name": .string("codexmobile_ios"),
@@ -332,11 +337,7 @@ extension CodexService {
 
         do {
             let handshake = try await sendRequest(method: "initialize", params: modernParams)
-            supportsClaudeChannels = handshake.result?.objectValue?["claudeChannels"]?.boolValue == true
-            supportsSharedSessionSettings = handshake.result?.objectValue?["sessionSettings"]?.boolValue == true
-            supportsMacTerminalOpen = handshake.result?.objectValue?["macTerminalOpen"]?.boolValue == true
-            supportsSharedSessionControl = handshake.result?.objectValue?["sharedSession"]?.boolValue == true
-            supportsTurnStateSnapshot = handshake.result?.objectValue?["turnStateSnapshot"]?.boolValue == true
+            applyBridgeCapabilities(handshake.result)
             // A successful modern initialize means the runtime accepted the experimental
             // capability negotiation. Keep plan-mode sends enabled unless the runtime
             // explicitly rejects `collaborationMode` on a turn request later.
@@ -363,7 +364,8 @@ extension CodexService {
                 "clientInfo": clientInfo,
             ])
             do {
-                _ = try await sendRequest(method: "initialize", params: legacyParams)
+                let handshake = try await sendRequest(method: "initialize", params: legacyParams)
+                applyBridgeCapabilities(handshake.result)
             } catch {
                 if let incompatibleAppVersionError = incompatibleBridgeAppVersionError(from: error) {
                     throw incompatibleAppVersionError
@@ -374,7 +376,13 @@ extension CodexService {
             debugRuntimeLog("initialize fallback experimentalApi=false")
         }
 
+        guard generation == connectionGeneration else { throw CodexServiceError.disconnected }
+        try Task.checkCancellation()
         try await sendNotification(method: "initialized", params: nil)
+        if supportsSharedSessionControl {
+            try await restoreSharedApprovals()
+        }
+        guard generation == connectionGeneration else { throw CodexServiceError.disconnected }
         isInitialized = true
     }
 
@@ -501,8 +509,11 @@ extension CodexService {
 
     // Runs the post-connect sync work that is useful but not required to mark the socket usable.
     func performPostConnectSyncPass(preferredThreadId: String? = nil) async {
+        let generation = connectionGeneration
         try? await ConnectionTrace.shared.measure("pc_list_models") { try await listModels() }
+        guard !Task.isCancelled, generation == connectionGeneration else { return }
         try? await ConnectionTrace.shared.measure("pc_list_threads") { try await listThreads() }
+        guard !Task.isCancelled, generation == connectionGeneration else { return }
         ConnectionTrace.shared.event("pc_threads_ready", ["threads": threads.count])
         if await routePendingNotificationOpenIfPossible(refreshIfNeeded: false) {
             return
@@ -541,6 +552,7 @@ extension CodexService {
 
     // Clears volatile runtime state on server switch.
     func resetThreadRuntimeStateForServerSwitch() {
+        lastNegotiatedSharedSession = false
         activeThreadId = nil
         activeTurnId = nil
         activeTurnIdByThread.removeAll()
@@ -614,6 +626,15 @@ extension CodexService {
 
     // Drops sync work tied to the old transport so reconnect starts from a clean baseline.
     private func clearConnectionSyncState() {
+        connectionGeneration &+= 1
+        applyBridgeCapabilities(nil)
+        threadListRefreshTask?.cancel()
+        threadListRefreshTask = nil
+        threadListRefreshToken = nil
+        pendingImmediateSyncTask?.cancel()
+        pendingImmediateSyncTask = nil
+        pendingImmediateSyncThreadID = nil
+        pendingImmediateSyncToken = nil
         isBootstrappingConnectionSync = false
         stopSyncLoop()
         postConnectSyncTask?.cancel()

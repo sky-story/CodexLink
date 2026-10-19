@@ -39,6 +39,7 @@
 | Bark 锁屏提醒 | 真机确认测试通知送达；后台任务完成自动发送通过，审批提醒真机待验收 |
 | Claude + Codex 通知 | Claude 真实回复后的自动提醒已确认锁屏送达；双 CLI 同时完成及审批提醒待验收，见[安装说明](docs/claude-notifications.md) |
 | Claude 会话和工具审批 | 已接入官方 Channels 预览协议；真机消息与同一 Mac 会话回复已验证，审批转发在 Mac 实测通过，手机审批待验收 |
+| Codex + Claude 会话总览 | 按项目分组，优先显示待处理和完成未读会话；隔离模拟器验证通过，完整真机交互待验收 |
 | 在 Mac 打开此会话（iTerm） | 已实现，受 macOS 自动化授权影响，完整真机链路待验收 |
 
 公开验证摘要和已知问题见 [验证记录](docs/validation.md)，发布定位见 [发布准备](docs/release-readiness.md)。
@@ -219,7 +220,7 @@ cd /path/to/your/project
 clink                           # 新会话，默认以当前目录名命名
 ```
 
-按 Claude 提示确认本地开发通道 **I am using this for local development**，完成项目/MCP 初始授权并保持终端打开。手机侧栏进入 **Claude 会话**，即可发送消息并查看回复。多个项目可分别开终端运行。
+按 Claude 提示确认本地开发通道 **I am using this for local development**，完成项目/MCP 初始授权并保持终端打开。手机侧栏进入 **会话总览**，选择 Claude 会话即可发送消息并查看回复；右上角 **Claude 接入** 保留专用列表和接入说明。多个项目可分别开终端运行。
 
 <a id="claude-preview"></a>
 <p align="center">

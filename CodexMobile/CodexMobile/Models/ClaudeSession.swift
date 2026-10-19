@@ -9,6 +9,8 @@ struct ClaudeSession: Codable, Identifiable, Equatable, Sendable {
     let online: Bool
     let verified: Bool
     let updatedAt: Double
+    var cwd: String? = nil
+    var lastAssistantSeq: Int? = nil
 
     var statusLabel: String {
         guard online else { return "Mac 会话已离线" }

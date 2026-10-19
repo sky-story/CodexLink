@@ -3,6 +3,9 @@ import Foundation
 
 extension CodexService {
     func sharedControl(threadID: String, action: String, text: String = "", requestID: JSONValue? = nil, decision: String? = nil, answers: JSONValue? = nil, model: String? = nil, effort: String? = nil) async throws {
+        guard isConnected, isInitialized, supportsSharedSessionControl else {
+            throw CodexServiceError.invalidInput("会话状态正在恢复，请稍后再试。")
+        }
         let id = UUID().uuidString
         var params: [String: JSONValue] = ["commandId": .string(id), "threadId": .string(threadID), "action": .string(action)]
         if action == "queue" || action == "steer" {
@@ -78,12 +81,20 @@ extension CodexService {
                 return pending.objectValue?["threadId"]?.stringValue == threadID
             }
             if unresolved { sharedControlStatus[threadID] = "Unconfirmed delivery remains. Check history before sending again." }
-            let sync = try await sendRequest(method: "remote/sync", params: .object(["after": .integer(0), "snapshotOnly": .bool(true)]))
-            for request in sync.result?.objectValue?["approvals"]?.arrayValue ?? [] {
-                guard let object = request.objectValue, let method = object["method"]?.stringValue, let id = object["id"] else { continue }
-                handleServerRequest(method: method, requestID: id, params: object["params"])
-            }
+            try await restoreSharedApprovals()
         } catch { sharedControlStatus[threadID] = error.localizedDescription }
+    }
+
+    // Read-only recovery before controls become usable; commands are never replayed.
+    func restoreSharedApprovals() async throws {
+        let sync = try await sendRequest(method: "remote/sync", params: .object(["after": .integer(0), "snapshotOnly": .bool(true)]))
+        guard let requests = sync.result?.objectValue?["approvals"]?.arrayValue else {
+            throw CodexServiceError.invalidResponse("Mac did not return the pending request snapshot")
+        }
+        for request in requests {
+            guard let object = request.objectValue, let method = object["method"]?.stringValue, let id = object["id"] else { continue }
+            handleServerRequest(method: method, requestID: id, params: object["params"])
+        }
     }
 }
 

@@ -11,6 +11,61 @@ final class CodexMobileUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testSidebarPreservesDraftAndLongMarkdownScroll() {
+        let app = XCUIApplication()
+        app.launchEnvironment["CODEX_REMOTE_DOCS_SCENE"] = "sidebar-performance"
+        app.launchEnvironment["CODEX_REMOTE_TEST_THREAD"] = "sidebar-demo"
+        app.launch()
+
+        let timeline = app.scrollViews["turn.timeline.scrollview"]
+        XCTAssertTrue(timeline.waitForExistence(timeout: 15))
+        let tail = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "SIDEBAR_TAIL_MARKER")).firstMatch
+        XCTAssertTrue(tail.waitForExistence(timeout: 10))
+        let field = app.descendants(matching: .any)["shared-message"].firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("sidebar-draft-retained")
+
+        for _ in 0..<3 {
+            app.buttons["Menu"].tap()
+            let close = app.buttons["Close menu"]
+            XCTAssertTrue(close.waitForExistence(timeout: 3))
+            XCTAssertTrue(app.buttons["会话总览"].exists)
+            close.tap()
+            XCTAssertTrue(field.waitForExistence(timeout: 3))
+            XCTAssertEqual(field.value as? String, "sidebar-draft-retained")
+        }
+
+        timeline.swipeDown(velocity: .slow)
+        timeline.swipeDown(velocity: .slow)
+        let latest = app.buttons["Scroll to latest message"]
+        XCTAssertTrue(latest.waitForExistence(timeout: 5))
+        app.buttons["Menu"].tap()
+        app.buttons["Close menu"].tap()
+        XCTAssertTrue(latest.exists, "Closing the drawer must preserve reading position")
+        latest.tap()
+        XCTAssertTrue(tail.waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "sidebar-draft-retained")
+    }
+
+    func testSessionOverviewRoutesToProviderSpecificConversation() {
+        let app = XCUIApplication()
+        app.launchEnvironment["CODEX_REMOTE_DOCS_SCENE"] = "agent-overview"
+        app.launch()
+        XCTAssertTrue(app.navigationBars["会话总览"].waitForExistence(timeout: 10))
+        let claude = app.buttons["session-claude-overview-claude"]
+        XCTAssertTrue(claude.waitForExistence(timeout: 10))
+        claude.tap()
+        XCTAssertTrue(app.staticTexts["Claude 请求使用 Bash"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["本次允许"].exists)
+        XCTAssertFalse(app.buttons["Steer"].exists)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let codex = app.buttons["session-codex-overview-ready"]
+        XCTAssertTrue(codex.waitForExistence(timeout: 5))
+        codex.tap()
+        XCTAssertTrue(app.buttons["Queue"].waitForExistence(timeout: 5))
+    }
+
     func testSharedSessionQueueOverEncryptedRelay() throws {
         let environment = ProcessInfo.processInfo.environment
         guard let pairing = environment["CODEX_REMOTE_TEST_PAIRING"],

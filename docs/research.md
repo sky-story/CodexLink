@@ -13,8 +13,19 @@
 | pkyanam/codex-ios `18321ff`，2026-05-07 | Apache-2.0 | 独立 `CodexSwiftSDK` 有 WebSocket、JSONValue、thread/resume、turn/steer 和测试。协议模型早于本机版本；采用主项目现有服务层可避免双 SDK，不直接复制 SDK |
 | naim149/codex-telegram-bridge `23497ba`，2026-04-29 | MIT，Benedict Evert | App Server 包装器会 spawn 独立进程，bot 支持 Steer/Abort/审批/上下文绑定。不能据此证明普通 CLI 的活动实例已共享；仅研究路由与错误处理 |
 | openai/codex 主分支 `f82e365`；版本 tag `rust-v0.162.1` → `7a078f6bb4ce0dc2a81408b334ce52979d92c603` | Apache-2.0 + NOTICE | 权威。使用实际安装二进制生成实验协议模型；以对应版本的实测结果决定行为，而不是直接套用主分支最新字段 |
+| herdrdev/herdr `143bf5fd`，2026-10-18 检查 | Apache-2.0 | 借鉴稳定客户端协议、连接代次隔离、按查看范围同步和多 Agent 状态总览；在现有 Node/Swift 实现中应用这些设计，没有复制 Rust 源码或引入 Herdr 运行时依赖 |
 
-以上仓库均已 clone 到相邻参考目录，未把参考仓库历史提交到正式工程。除主项目外，没有复制其他第三方项目源码。维护时间只是检查提交时间，不等于维护承诺。
+参考仓库位于相邻参考目录或独立的 Herdr checkout，未把参考仓库历史提交到正式工程。除主项目外，没有复制其他第三方项目源码。维护时间只是检查提交时间，不等于维护承诺。
+
+## 客户端兼容与会话总览
+
+Bridge 的 `client-protocol.js` 统一生成直接运行时和手机重连快捷路径的能力响应。保留 v1 平铺字段与 `controlProtocol: 1`，新增字段保持可选，冻结样例位于 `test/fixtures/client-handshake-v1.json`。iOS 统一解析能力；缺失字段默认关闭，未知控制协议不启用共享写操作，Claude 和只读能力独立判断。
+
+连接代次绑定 RPC 响应与列表同步，已退役连接不能发布新状态。初始化同时设置 15 秒无入站消息超时与 60 秒总就绪期限，并在启用共享控制前读取待处理请求。恢复只读取快照和回执，不重发结果未知的指令。
+
+启动、前台和主动刷新复用同一列表读取；相同列表不重新计算全部时间线。支持轻量 Turn 状态的 Bridge 在后台会话完成时只更新状态，完整历史在打开会话后恢复。导航到会话总览、Claude 或设置时，停止所选 Codex 聊天的详细轮询；实时事件、回执和通知仍按原路径处理。
+
+会话总览按项目路径分组，优先展示待审批、待输入、失败和完成未读。身份包含 Mac、Agent 类型和原会话 ID，避免不同 Agent 的同名 ID 混淆。Claude 摘要增加可选 `cwd`、`lastAssistantSeq`；已读位置按 Mac 身份保存在手机，仅在回复实际加载后推进。各 Agent 继续进入原有会话页面，使用各自真实支持的操作。
 
 ## 官方协议
 

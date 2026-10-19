@@ -62,6 +62,8 @@ test('phone initialize and reconnect advertise shared settings through the outer
   for (const id of ['first-connection', 'phone-reconnect']) {
     router.initialize(id);
     const response = router.replies.find(r => r.id === id);
+    const contract = require('./fixtures/client-handshake-v1.json');
+    for (const [key, expected] of Object.entries(contract)) assert.deepEqual(response.result[key], expected, key);
     assert.equal(response?.result?.sessionSettings, true);
     assert.equal(response.result.claudeChannels, true);
     assert.equal(response.result.turnStateSnapshot, true);
@@ -69,6 +71,16 @@ test('phone initialize and reconnect advertise shared settings through the outer
     assert.equal(response.result.macTerminalOpen, true);
   }
   assert.equal(router.forwarded.length, 0, 'warm handshake is answered by Bridge, not runtime');
+});
+
+test('legacy phone initialize without capability preferences retains the v1 handshake', () => {
+  const router = phoneRouter();
+  router.request({ id: 'legacy-phone', method: 'initialize', params: { clientInfo: { name: 'fixture-legacy' } } });
+  const response = router.replies.find(r => r.id === 'legacy-phone');
+  for (const [key, expected] of Object.entries(require('./fixtures/client-handshake-v1.json'))) {
+    assert.deepEqual(response.result[key], expected, key);
+  }
+  assert.equal(router.forwarded.length, 0);
 });
 
 test('non-shared transport never advertises shared settings', () => {
