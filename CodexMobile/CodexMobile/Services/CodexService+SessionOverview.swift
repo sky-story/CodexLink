@@ -14,7 +14,7 @@ extension CodexService {
             let status: AgentSessionStatus
             if !online { status = .offline }
             else if approvalThreads.contains(thread.id) { status = .approval }
-            else if threadTimelineStateByThread[thread.id]?.renderSnapshot.planMatchingMessages.isEmpty == false { status = .input }
+            else if inputRequiredThreadIDs.contains(thread.id) { status = .input }
             else if failedThreadIDs.contains(thread.id) { status = .failed }
             else if threadHasActiveOrRunningTurn(thread.id) { status = .working }
             else if readyThreadIDs.contains(thread.id) { status = .unread }
@@ -23,7 +23,15 @@ extension CodexService {
                                        name: thread.displayTitle, project: projectName(for: thread.cwd), projectPath: thread.cwd,
                                        status: status, updatedAt: thread.updatedAt ?? thread.createdAt ?? .distantPast)
         }
-        let claudeSummaries = claudeSessions.map { session in
+        return AgentSessionSummary.sorted(codexSummaries + claudeSessionSummaries(claudeSessions))
+    }
+
+    func claudeSessionSummaries(_ sessions: [ClaudeSession]) -> [AgentSessionSummary] {
+        let server = sessionOverviewServerKey
+        let online = isConnected && isInitialized
+        // UserDefaults itself is not observable; only a genuinely new read marker invalidates lists.
+        _ = claudeSeenRevision
+        return AgentSessionSummary.sorted(sessions.map { session in
             let status: AgentSessionStatus
             if !online || !supportsClaudeChannels || !session.online { status = .offline }
             else if session.phase == "approval" { status = .approval }
@@ -34,15 +42,17 @@ extension CodexService {
             return AgentSessionSummary(id: .init(server: server, provider: .claude, session: session.id),
                                        name: session.name, project: session.project, projectPath: session.cwd,
                                        status: status, updatedAt: Date(timeIntervalSince1970: session.updatedAt / 1000))
-        }
-        return AgentSessionSummary.sorted(codexSummaries + claudeSummaries)
+        })
     }
 
     func markClaudeSessionSeen(_ snapshot: ClaudeSnapshot) {
         // Mark only replies actually displayed, never a newer sequence from a racing snapshot.
         let sequence = snapshot.messages.filter { $0.role == "assistant" }.map(\.seq).max() ?? 0
         let key = claudeSeenKey(sessionID: snapshot.session.id)
-        if sequence > defaults.integer(forKey: key) { defaults.set(sequence, forKey: key) }
+        if sequence > defaults.integer(forKey: key) {
+            defaults.set(sequence, forKey: key)
+            claudeSeenRevision &+= 1
+        }
     }
 
     private func claudeSeenKey(sessionID: String) -> String {

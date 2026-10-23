@@ -104,14 +104,43 @@ struct MarkdownTextView: View {
     var enablesSelection: Bool = false
     var constrainsToAvailableWidth: Bool = false
 
+    // Claude and headings retain the system foreground. Codex's strong emphasis
+    // matches the user's terminal reference without recoloring ordinary prose.
+    private static let assistantInlineStyle = InlineStyle.gitHub
+        .strong(.fontWeight(.semibold))
+        .code(.monospaced, .fontScale(0.9), .foregroundColor(DynamicColor(
+            light: Color(red: 64.0 / 255, green: 160.0 / 255, blue: 43.0 / 255),
+            dark: Color(red: 166.0 / 255, green: 227.0 / 255, blue: 161.0 / 255)
+        )), .backgroundColor(Color.primary.opacity(0.05)))
+
+    private static let codexInlineStyle = assistantInlineStyle
+        .strong(.fontWeight(.semibold), CodexStrongForeground())
+
+    private var inlineStyle: InlineStyle {
+        switch profile {
+        case .assistantProse: return Self.codexInlineStyle
+        case .claudeProse: return Self.assistantInlineStyle
+        case .fileChangeSystem: return .gitHub
+        }
+    }
+
     var body: some View {
         let transformed = MarkdownTextFormatter.renderableText(from: text, profile: profile)
         // Keep prose on the app font, but let Textual own markdown/code layout to avoid block sizing regressions.
         // Force code-block overflow to wrap instead of scroll so horizontal ScrollViews
         // inside the timeline do not compete with the sidebar swipe gesture or let
         // the chat feel like a pannable canvas.
-        let baseView = StructuredText(transformed, parser: CachingMarkdownParser.shared)
+        let content = StructuredText(transformed, parser: CachingMarkdownParser.shared)
             .font(AppFont.body())
+            // The nearer environment override wins over the base theme below.
+            .textual.inlineStyle(inlineStyle)
+        let baseView = Group {
+            if case .fileChangeSystem = profile {
+                content
+            } else {
+                content.textual.headingStyle(CompactChatHeadingStyle(inlineStyle: Self.assistantInlineStyle))
+            }
+        }
             .textual.structuredTextStyle(.gitHub)
             .textual.overflowMode(.wrap)
 
@@ -132,6 +161,31 @@ struct MarkdownTextView: View {
         } else {
             renderedContent
         }
+    }
+}
+
+private struct CodexStrongForeground: TextProperty {
+    func apply(in attributes: inout AttributeContainer, environment: TextEnvironmentValues) {
+        // Textual applies code before strong. Preserve the code's green while
+        // coloring the surrounding emphasized prose red, as in the CLI reference.
+        guard attributes.foregroundColor == nil else { return }
+        ForegroundColorProperty(DynamicColor(
+            light: Color(red: 210.0 / 255, green: 15.0 / 255, blue: 57.0 / 255),
+            dark: Color(red: 243.0 / 255, green: 139.0 / 255, blue: 168.0 / 255)
+        )).apply(in: &attributes, environment: environment)
+    }
+}
+
+private struct CompactChatHeadingStyle: StructuredText.HeadingStyle {
+    let inlineStyle: InlineStyle
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .textual.inlineStyle(inlineStyle)
+            .fontWeight(.semibold)
+            .foregroundStyle(.primary)
+            .textual.lineSpacing(.fontScaled(0.25))
+            .textual.blockSpacing(.init(top: 0, bottom: 16))
     }
 }
 
@@ -292,12 +346,19 @@ enum MarkdownTextFormatter {
                 in: raw,
                 style: .displayName
             )
-            let headingNormalized = replaceMatches(
-                in: normalizedSkills,
-                regex: TurnMessageRegexCache.heading,
-                template: "**$1**"
-            )
-            return linkifyFileReferenceLines(in: headingNormalized, profile: profile)
+            // Preserve heading semantics in conversations so headings can stay
+            // neutral while Codex strong emphasis is red. Code fences also stay literal.
+            let formatted: String
+            if case .fileChangeSystem = profile {
+                formatted = replaceMatches(
+                    in: normalizedSkills,
+                    regex: TurnMessageRegexCache.heading,
+                    template: "**$1**"
+                )
+            } else {
+                formatted = normalizedSkills
+            }
+            return linkifyFileReferenceLines(in: formatted, profile: profile)
         }
     }
 
@@ -324,7 +385,7 @@ enum MarkdownTextFormatter {
 
     private static func linkifyInlineFileReferences(in line: String, profile: MarkdownRenderProfile) -> String {
         switch profile {
-        case .assistantProse, .fileChangeSystem:
+        case .assistantProse, .claudeProse, .fileChangeSystem:
             break
         }
 
@@ -1481,11 +1542,12 @@ struct MessageRow: View, Equatable {
     }
 }
 
-private struct SelectableMessageTextSheetState: Identifiable {
+struct SelectableMessageTextSheetState: Identifiable {
     let id = UUID()
     let role: CodexMessageRole
     let text: String
     let usesMarkdownSelection: Bool
+    var markdownProfile: MarkdownRenderProfile = .assistantProse
 
     var title: String {
         switch role {
@@ -1499,7 +1561,7 @@ private struct SelectableMessageTextSheetState: Identifiable {
     }
 }
 
-private struct SelectableMessageTextSheet: View {
+struct SelectableMessageTextSheet: View {
     let state: SelectableMessageTextSheetState
     @Environment(\.dismiss) private var dismiss
 
@@ -1510,7 +1572,7 @@ private struct SelectableMessageTextSheet: View {
                     if state.usesMarkdownSelection {
                         MarkdownTextView(
                             text: state.text,
-                            profile: .assistantProse,
+                            profile: state.markdownProfile,
                             enablesSelection: true
                         )
                     } else {

@@ -21,6 +21,12 @@ private enum RootSheetRoute: Identifiable, Equatable {
     }
 }
 
+private struct ClaudeConversationRoute: Hashable {
+    let server: String
+    let sessionID: String
+    let name: String
+}
+
 struct ContentView: View {
     @Environment(CodexService.self) private var codex
     @Environment(\.scenePhase) private var scenePhase
@@ -348,7 +354,13 @@ struct ContentView: View {
                         },
                         onOpenSessions: {
                             closeSidebar()
-                            navigationPath.append("sessions")
+                            navigationPath = NavigationPath(["sessions"])
+                        },
+                        onOpenClaudeSession: { session in
+                            closeSidebar()
+                            navigationPath = NavigationPath([ClaudeConversationRoute(
+                                server: session.id.server, sessionID: session.id.session, name: session.name
+                            )])
                         }
                     )
                     .frame(width: currentSidebarWidth)
@@ -400,6 +412,10 @@ struct ContentView: View {
                         }
                         .adaptiveNavigationBar()
                     }
+                }
+                .navigationDestination(for: ClaudeConversationRoute.self) { route in
+                    ClaudeConversationView(server: route.server, sessionID: route.sessionID, initialName: route.name)
+                        .adaptiveNavigationBar()
                 }
         }
         .onChange(of: navigationPath) { _, path in
@@ -722,6 +738,7 @@ struct ContentView: View {
     }
 
     private func openThreadFromSidebar(_ thread: CodexThread) {
+        if !navigationPath.isEmpty { navigationPath = NavigationPath() }
         if isSidebarOpen || sidebarDragOffset > 0 {
             closeSidebar()
         }
@@ -816,9 +833,7 @@ struct ContentView: View {
             "setSidebar open=\(open) prewarmed=\(isSidebarPrewarmed) "
                 + "visible=\(sidebarVisible) revealWidth=\(Int(sidebarRevealWidth))"
         )
-        if open {
-            dismissActiveKeyboard()
-        }
+        dismissActiveKeyboard()
         withAnimation(Self.sidebarSpring) {
             isSidebarOpen = open
             sidebarDragOffset = 0

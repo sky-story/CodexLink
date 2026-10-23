@@ -8,6 +8,31 @@
 
 免费 Apple ID 可用于能力受限的真机开发安装。完整 APNs 测试需要相应 Apple Developer 能力。iOS deployment target 为 18.6；新 UI 在 iOS 26.5 模拟器编译与运行验证。
 
+### 双击更新 / 免费签名续签
+
+完成首次 Xcode 安装后，连接并解锁 iPhone，双击项目根目录的 **[更新 CodexLink.command](../更新%20CodexLink.command)**。保持手机连接，安装阶段保持解锁；如果编译期间自动锁屏，工具会等待最多 2 分钟供你解锁，无需重新编译。完成后窗口显示本次代码摘要、App 版本和签名实际到期时间。工具只覆盖同一 Bundle ID 的已有开发版 App，沿用当前 Xcode 工程的个人签名设置。
+
+- **以后修改代码仍用同一个工具。** 每次复制当前工作区源码（包含未提交、新增的文件和私有 iOS 配置）到新的临时目录，从头编译和验证完整签名。没有预置安装包，也不会在失败后改用旧包。
+- **运行工具不会覆盖项目更新。** 不执行 Git 拉取、切换、重置、提交或推送；不会将 GitHub 的代码写入工作区。源码在复制、编译、安装前检查，发现期间有变化就停止，保存完成后再运行。
+- **“最新”指启动器所在项目的本地代码。** GitHub 上的更新需要先由你正常同步到这个项目，再运行工具。不要把启动器单独复制到别处；桌面入口可使用 Finder 的“制作替身”。工具会阻止版本号降低，以及当前 Git 提交未包含上次安装提交的情况；它无法判断尚未同步到本机的远端代码是否更新。
+- **保留数据。** 覆盖前私有备份手机 App 的 `Library`，覆盖后、启动前比较 `Application Support` 和 `Preferences`。不卸载、不自动还原备份、不重置配对；Keychain 由系统在同身份覆盖安装时保留，备份不包含 Keychain。若 App 在备份期间写入数据，前后可能不同，工具会保留证据并提示核对。
+- **只更新手机 App。** 不重启 Claude、Codex、Bridge、Relay 或通知服务。如果以后同时修改 Mac 端协议，手机安装本身不会部署 Mac 端更新；需在合适时机按该版本说明更新 Mac 服务。
+
+工具按工程的 `Package.resolved` 构建依赖，不会自动升级依赖版本。如果以后的更新改变了依赖声明，请先在 Xcode 完成依赖解析并保存新的锁定文件，再运行工具。
+
+[Apple 对 Personal Team 的限制](https://developer.apple.com/help/account/basics/about-your-developer-account)是描述文件签发后 7 天到期。Xcode 可能继续使用尚未到期的描述文件，**重新安装不等于重新获得 7 天**。工具允许 Xcode 更新签名，拒绝已过期产物，并显示真实到期时间；不会删除描述文件或吊销证书来强制续期。若签名未能续上，先检查 Xcode → Settings → Accounts 的账号状态，再重试。安装后若提示“不受信任的开发者”，在「设置 → 通用 → VPN 与设备管理」中信任自己的开发者账号。
+
+命令行入口：
+
+```sh
+python3 scripts/install-iphone.py
+python3 scripts/install-iphone.py --device '你的 iPhone 名称'
+python3 scripts/install-iphone.py --build-only  # 只编译/检查，不安装
+python3 -m unittest discover -s scripts/tests -p 'test_install_iphone.py'
+```
+
+日志、源码摘要和手机备份位于 Git 忽略的 `.build/iphone-installer/runs/`，目录仅本机用户可读。成功安装并打开后自动清理当次临时源码和编译产物，保留记录及备份；失败或仅构建时保留产物用于排查。旧运行目录可在确认不需要备份后自行删除。每台手机的上次安装记录保存在 `~/Library/Application Support/CodexLink/iphone-installer/`，用于检查签名身份和防止回退；不包含 Apple 登录凭据。不要将日志、备份或个人签名设置提交 GitHub。
+
 ## Tailscale 私网
 
 两端连接 Tailscale 后，双击 `scripts/start-private-remote.command` 安装并启动当前用户的后台服务。它使用 Mac App 内置的 Tailscale CLI，只在 Tailscale 私网地址的 9100 端口运行 Relay。可以关闭终端窗口。首次配对会在浏览器显示二维码；需要新二维码时双击 `scripts/pair-iphone.command`。二维码过期不撤销已经建立的信任。免费签名 App 首次安装后，可能需要在 iPhone 的「设置 → 通用 → VPN 与设备管理」中信任开发者。

@@ -1,14 +1,9 @@
 import SwiftUI
+import UIKit
 
 struct ClaudeSessionsView: View {
     @Environment(CodexService.self) private var codex
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var sessions: [ClaudeSession] = []
-    @State private var errorMessage: String?
-    @State private var loading = false
     @State private var showHelp = false
-
-    private var pollKey: String { "\(codex.isConnected)-\(codex.supportsClaudeChannels)-\(scenePhase == .active)-\(codex.normalizedRelaySessionId ?? "")" }
 
     var body: some View {
         List {
@@ -17,14 +12,14 @@ struct ClaudeSessionsView: View {
             } else if !codex.supportsClaudeChannels {
                 Text("更新 Mac 后台服务后，即可使用 Claude 会话。")
             }
-            if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.footnote) }
-            if sessions.isEmpty && !loading {
+            if let errorMessage = codex.cachedClaudeSessionsError { Text(errorMessage).foregroundStyle(.red).font(.footnote) }
+            if codex.cachedClaudeSessions.isEmpty {
                 ContentUnavailableView("暂无 Claude 会话", systemImage: "terminal", description: Text("在 Mac 启动已接入 CodexLink 的 Claude 会话后，会显示在这里。"))
                     .listRowSeparator(.hidden)
             }
-            ForEach(sessions) { session in
+            ForEach(codex.cachedClaudeSessions) { session in
                 NavigationLink {
-                    ClaudeConversationView(sessionID: session.id, initialName: session.name)
+                    ClaudeConversationView(server: codex.sessionOverviewServerKey, sessionID: session.id, initialName: session.name)
                 } label: {
                     VStack(alignment: .leading, spacing: 5) {
                         HStack {
@@ -40,30 +35,13 @@ struct ClaudeSessionsView: View {
         }
         .navigationTitle("Claude 会话")
         .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("接入说明", systemImage: "questionmark.circle") { showHelp = true } } }
-        .overlay { if loading && sessions.isEmpty { ProgressView() } }
-        .refreshable { await refresh() }
-        .task(id: pollKey) {
-            while !Task.isCancelled && codex.isConnected && codex.supportsClaudeChannels && scenePhase == .active {
-                await refresh()
-                do { try await Task.sleep(for: .seconds(3)) } catch { return }
-            }
-        }
-        .onChange(of: codex.normalizedRelaySessionId) { _, _ in sessions = []; errorMessage = nil }
+        .refreshable { await codex.refreshClaudeSessions(force: true) }
+        .syncClaudeSessionList()
         .sheet(isPresented: $showHelp) { ClaudeConnectionHelpView() }
-    }
-
-    private func refresh() async {
-        guard codex.isConnected, codex.supportsClaudeChannels, !loading else { return }
-        loading = true; defer { loading = false }
-        do {
-            let result = try await codex.listClaudeSessions()
-            guard !Task.isCancelled else { return }
-            sessions = result; errorMessage = nil
-        } catch { if !Task.isCancelled { errorMessage = error.localizedDescription } }
     }
 }
 
-private struct ClaudeConnectionHelpView: View {
+struct ClaudeConnectionHelpView: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
@@ -90,34 +68,47 @@ private struct ClaudeConnectionHelpView: View {
 struct ClaudeConversationView: View {
     @Environment(CodexService.self) private var codex
     @Environment(\.scenePhase) private var scenePhase
-    let sessionID: String
     let initialName: String
-    @State private var snapshot: ClaudeSnapshot?
-    @State private var messages: [ClaudeChatMessage] = []
-    @State private var nextBefore: Int?
-    @State private var draft = ""
-    @State private var loading = false
-    @State private var sending = false
-    @State private var errorMessage: String?
-    @State private var unconfirmed: [ClaudePendingOperation] = []
+    @State private var model: ClaudeConversationModel
     @State private var permissionToAllow: ClaudePermission?
-    private var pollKey: String { "\(codex.isConnected)-\(codex.supportsClaudeChannels)-\(scenePhase == .active)-\(codex.normalizedRelaySessionId ?? "")" }
-    private var canSend: Bool { codex.isConnected && codex.supportsClaudeChannels && snapshot?.session.online == true && !sending && unconfirmed.isEmpty }
+    @State private var selectedMessage: SelectableMessageTextSheetState?
+    private var pollKey: String {
+        "\(codex.sessionOverviewServerKey):\(codex.isConnected):\(codex.isInitialized):\(codex.supportsClaudeChannels):\(scenePhase == .active):\(codex.normalizedRelaySessionId ?? "")"
+    }
+    private var canSend: Bool { model.canSend(codex) }
+
+    init(server: String, sessionID: String, initialName: String) {
+        self.initialName = initialName
+        _model = State(initialValue: ClaudeConversationModel(server: server, sessionID: sessionID))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             statusBar
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
-                    if nextBefore != nil { Button("加载更早消息") { Task { await refresh(older: true) } }.disabled(loading) }
-                    if messages.isEmpty { Text("发送一条消息，与 Mac 上的 Claude 继续对话。接入前的历史不会自动导入。")
+                    if model.nextBefore != nil { Button("加载更早消息") { Task { await refresh(older: true) } }.disabled(model.loading || !model.canRead(codex)) }
+                    if model.messages.isEmpty { Text("发送一条消息，与 Mac 上的 Claude 继续对话。接入前的历史不会自动导入。")
                         .font(.callout).foregroundStyle(.secondary).padding(.vertical, 24) }
-                    ForEach(messages) { message in
+                    ForEach(model.messages) { message in
                         VStack(alignment: .leading, spacing: 6) {
                             Text(message.role == "assistant" ? "Claude" : message.source == "mac" ? "你 · Mac" : "你 · iPhone")
                                 .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                            Text(message.text).textSelection(.enabled)
-                            if let receipt = snapshot?.receipts.first(where: { $0.id == message.id }) {
+                            if message.role == "assistant" {
+                                MarkdownTextView(text: message.text, profile: .claudeProse, constrainsToAvailableWidth: true)
+                                    .contextMenu {
+                                        Button("复制回复", systemImage: "doc.on.doc") {
+                                            UIPasteboard.general.string = message.text
+                                        }
+                                        Button("选择文字", systemImage: "text.cursor") {
+                                            selectedMessage = .init(role: .assistant, text: message.text, usesMarkdownSelection: true, markdownProfile: .claudeProse)
+                                        }
+                                    }
+                                CopyBlockButton(text: message.text)
+                            } else {
+                                Text(message.text).font(AppFont.body()).textSelection(.enabled)
+                            }
+                            if let receipt = model.snapshot?.receipts.first(where: { $0.id == message.id }) {
                                 Text(receipt.statusLabel).font(.caption).foregroundStyle(.secondary)
                             }
                         }
@@ -125,13 +116,12 @@ struct ClaudeConversationView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(message.role == "assistant" ? Color(.secondarySystemBackground) : Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
                     }
-                    ForEach(snapshot?.permissions ?? []) { permission in permissionCard(permission) }
-                    ForEach(unconfirmed) { operation in
+                    ForEach(model.snapshot?.permissions ?? []) { permission in permissionCard(permission) }
+                    ForEach(model.unconfirmed) { operation in
                         VStack(alignment: .leading, spacing: 8) {
                             Text("有一项操作的发送结果尚未确认。请核对本会话和 Mac，避免重复发送。")
                             Button("我已核对，继续操作") {
-                                codex.dismissClaudeUnconfirmed(operation)
-                                unconfirmed = codex.pendingClaudeOperations(sessionID: sessionID)
+                                model.dismiss(operation, using: codex)
                             }
                         }.font(.footnote).padding().background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
                     }
@@ -141,16 +131,17 @@ struct ClaudeConversationView: View {
             .refreshable { await refresh() }
             composer
         }
-        .navigationTitle(snapshot?.session.name ?? initialName)
+        .navigationTitle(model.snapshot?.session.name ?? initialName)
         .navigationBarTitleDisplayMode(.inline)
         .task(id: pollKey) {
-            unconfirmed = codex.pendingClaudeOperations(sessionID: sessionID)
-            while !Task.isCancelled && codex.isConnected && codex.supportsClaudeChannels && scenePhase == .active {
+            model.updatePending(codex)
+            while !Task.isCancelled && model.canRead(codex) && scenePhase == .active {
                 await refresh()
                 do { try await Task.sleep(for: .seconds(2)) } catch { return }
             }
         }
-        .onChange(of: codex.normalizedRelaySessionId) { _, _ in snapshot = nil; messages = []; draft = ""; unconfirmed = []; nextBefore = nil }
+        .onChange(of: pollKey) { _, _ in permissionToAllow = nil }
+        .sheet(item: $selectedMessage) { SelectableMessageTextSheet(state: $0) }
         .confirmationDialog("仅允许这一次操作？", isPresented: Binding(get: { permissionToAllow != nil }, set: { if !$0 { permissionToAllow = nil } }), titleVisibility: .visible) {
             Button("本次允许") { if let permission = permissionToAllow { Task { await decide(permission, behavior: "allow") } }; permissionToAllow = nil }
             Button("取消", role: .cancel) { permissionToAllow = nil }
@@ -159,18 +150,29 @@ struct ClaudeConversationView: View {
 
     private var statusBar: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(codex.isConnected ? snapshot?.session.statusLabel ?? "读取会话…" : "与 Mac 的连接已断开")
-            if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+            if !model.isCurrentHost(codex) {
+                Text("此会话属于另一台 Mac，请返回会话列表。")
+            } else if !codex.isConnected {
+                Text("与 Mac 的连接已断开")
+            } else if !codex.isInitialized {
+                Text("正在恢复会话状态…")
+            } else if !codex.supportsClaudeChannels {
+                Text("更新 Mac 后台服务后，即可使用 Claude 会话。")
+            } else {
+                Text(model.snapshot?.session.statusLabel ?? "读取会话…")
+            }
+            if let errorMessage = model.errorMessage { Text(errorMessage).foregroundStyle(.red) }
         }.font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal).padding(.vertical, 8)
     }
 
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 12) {
-            TextField("发送给 Claude", text: $draft, axis: .vertical).lineLimit(1...6).textFieldStyle(.plain)
-            Button { Task { await send() } } label: {
+            TextField("发送给 Claude", text: $model.draft, axis: .vertical).lineLimit(1...6).textFieldStyle(.plain)
+                .accessibilityIdentifier("claude-message")
+            Button { Task { await model.send(using: codex) } } label: {
                 Image(systemName: "arrow.up.circle.fill").font(.system(size: 30))
             }.accessibilityLabel("发送给 Claude")
-                .disabled(!canSend || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!canSend || model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }.padding().background(.bar)
     }
 
@@ -194,45 +196,10 @@ struct ClaudeConversationView: View {
     }
 
     private func refresh(older: Bool = false) async {
-        guard codex.isConnected, codex.supportsClaudeChannels, !loading else { return }
-        loading = true; defer { loading = false }
-        do {
-            let result = try await codex.readClaudeSession(sessionID, before: older ? nextBefore : nil)
-            guard !Task.isCancelled else { return }
-            // After a long disconnect, the newest page may no longer overlap
-            // loaded history. Reset its cursor so intervening messages remain reachable.
-            if !older, let first = result.messages.first, let last = messages.last,
-               first.seq > last.seq, result.nextBefore != nil {
-                messages = []
-            }
-            var indexed = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
-            result.messages.forEach { indexed[$0.id] = $0 }
-            let wasEmpty = messages.isEmpty
-            messages = indexed.values.sorted { $0.seq < $1.seq }
-            if older || wasEmpty { nextBefore = result.nextBefore }
-            snapshot = result
-            if !older, scenePhase == .active { codex.markClaudeSessionSeen(result) }
-            await codex.recoverClaudeOperations(sessionID: sessionID)
-            unconfirmed = codex.pendingClaudeOperations(sessionID: sessionID)
-            errorMessage = nil
-        } catch { if !Task.isCancelled { errorMessage = error.localizedDescription } }
-    }
-
-    private func send() async {
-        guard canSend, let session = snapshot?.session else { return }
-        let value = draft; sending = true
-        defer { sending = false }
-        do {
-            _ = try await codex.sendClaudeCommand(session: session, text: value)
-            if draft == value { draft = "" }
-            await refresh()
-        } catch { errorMessage = error.localizedDescription; unconfirmed = codex.pendingClaudeOperations(sessionID: sessionID) }
+        await model.refresh(using: codex, older: older, markSeen: scenePhase == .active)
     }
 
     private func decide(_ permission: ClaudePermission, behavior: String) async {
-        guard canSend, let session = snapshot?.session else { return }
-        sending = true; defer { sending = false }
-        do { _ = try await codex.sendClaudeCommand(session: session, permission: permission, behavior: behavior); await refresh() }
-        catch { errorMessage = error.localizedDescription; unconfirmed = codex.pendingClaudeOperations(sessionID: sessionID) }
+        await model.decide(permission, behavior: behavior, using: codex)
     }
 }

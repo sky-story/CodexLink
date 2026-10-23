@@ -2,20 +2,12 @@ import SwiftUI
 
 struct SessionOverviewView: View {
     @Environment(CodexService.self) private var codex
-    @Environment(\.scenePhase) private var scenePhase
     var onOpenCodex: (CodexThread) -> Void
-    @State private var claudeSessions: [ClaudeSession] = []
     @State private var search = ""
     @State private var attentionOnly = false
-    @State private var errorMessage: String?
-    @State private var refreshID = UUID()
-
-    private var pollKey: String {
-        "\(codex.sessionOverviewServerKey)-\(codex.isConnected)-\(codex.isInitialized)-\(codex.supportsClaudeChannels)-\(scenePhase == .active)-\(refreshID)"
-    }
 
     private var sessions: [AgentSessionSummary] {
-        codex.sessionSummaries(claudeSessions: claudeSessions).filter {
+        codex.sessionSummaries(claudeSessions: codex.cachedClaudeSessions).filter {
             (!attentionOnly || $0.status.needsAttention) &&
             (search.isEmpty || "\($0.name) \($0.project) \($0.projectPath ?? "") \($0.id.provider.rawValue)".localizedCaseInsensitiveContains(search))
         }
@@ -36,7 +28,7 @@ struct SessionOverviewView: View {
                 Label(codex.isConnected ? "正在恢复会话状态…" : "与 Mac 的连接已断开", systemImage: "wifi.slash")
                     .font(.footnote).foregroundStyle(.secondary)
             }
-            if let errorMessage { Text(errorMessage).font(.footnote).foregroundStyle(.red) }
+            if let errorMessage = codex.cachedClaudeSessionsError { Text(errorMessage).font(.footnote).foregroundStyle(.red) }
 
             if !attention.isEmpty {
                 Section("需要关注 · \(attention.count)") {
@@ -64,21 +56,20 @@ struct SessionOverviewView: View {
         .navigationTitle("会话总览")
         .searchable(text: $search, prompt: "搜索会话、项目或 Agent")
         .toolbar { ToolbarItem(placement: .topBarTrailing) { NavigationLink("Claude 接入") { ClaudeSessionsView() } } }
-        .refreshable { await refresh() }
-        .onAppear { refreshID = UUID() }
-        .onChange(of: codex.sessionOverviewServerKey) { _, _ in claudeSessions = []; errorMessage = nil }
-        .task(id: pollKey) {
-            while !Task.isCancelled && codex.isConnected && codex.isInitialized && scenePhase == .active {
-                await refresh()
-                do { try await Task.sleep(for: .seconds(5)) } catch { return }
-            }
+        .syncClaudeSessionList()
+        .refreshable {
+            // Regular Codex list sync already runs in the service. Only explicit
+            // pull-to-refresh requests both providers, without serializing their reads.
+            async let threads: Void = codex.syncThreadsList()
+            async let claude: Void = codex.refreshClaudeSessions(force: true)
+            _ = await (threads, claude)
         }
     }
 
     @ViewBuilder
     private func sessionRow(_ session: AgentSessionSummary) -> some View {
         if session.id.provider == .claude {
-            NavigationLink { ClaudeConversationView(sessionID: session.id.session, initialName: session.name) } label: { rowLabel(session) }
+            NavigationLink { ClaudeConversationView(server: session.id.server, sessionID: session.id.session, initialName: session.name) } label: { rowLabel(session) }
                 .accessibilityIdentifier("session-claude-\(session.id.session)")
         } else {
             Button {
@@ -115,17 +106,5 @@ struct SessionOverviewView: View {
         case .idle: return "pause.circle"
         case .offline: return "wifi.slash"
         }
-    }
-
-    private func refresh() async {
-        guard codex.isConnected, codex.isInitialized else { return }
-        let server = codex.sessionOverviewServerKey
-        await codex.syncThreadsList()
-        guard !Task.isCancelled, codex.supportsClaudeChannels else { return }
-        do {
-            let result = try await codex.listClaudeSessions()
-            guard !Task.isCancelled, server == codex.sessionOverviewServerKey else { return }
-            claudeSessions = result; errorMessage = nil
-        } catch { if !Task.isCancelled { errorMessage = error.localizedDescription } }
     }
 }

@@ -330,6 +330,15 @@ final class CodexService {
     // Keep the same composer (and its unsent draft) mounted during a transient disconnect.
     var lastNegotiatedSharedSession = false
     var supportsClaudeChannels = false
+    var claudeSessionList: [ClaudeSession] = []
+    var claudeSessionListServerKey: String?
+    var claudeSessionListError: String?
+    var claudeSeenRevision = 0
+    @ObservationIgnored var claudeSessionListRefreshedAt: Date?
+    @ObservationIgnored var claudeSessionListGeneration: UInt64?
+    @ObservationIgnored var claudeSessionListTask: Task<Void, Never>?
+    @ObservationIgnored var claudeSessionListTaskScope: String?
+    @ObservationIgnored var claudeSessionListTaskToken: UUID?
     var sharedControlStatus: [String: String] = [:]
     var sharedQueueText: [String: [String]] = [:]
     var isInitialized = false
@@ -355,6 +364,8 @@ final class CodexService {
     var protectedRunningFallbackThreadIDs: Set<String> = []
     var readyThreadIDs: Set<String> = []
     var failedThreadIDs: Set<String> = []
+    // List screens observe this small signal, never the streaming render snapshots.
+    var inputRequiredThreadIDs: Set<String> = []
     // Threads that started a real run and haven't completed yet; survives sync-poll clearing.
     @ObservationIgnored var threadsPendingCompletionHaptic: Set<String> = []
     // Keeps the latest terminal outcome per thread so UI can react to real run completion.
@@ -829,6 +840,7 @@ final class CodexService {
             self.secureConnectionState = .liveSessionUnresolved
             self.secureMacFingerprint = codexSecureFingerprint(for: trustedMac.macIdentityPublicKey)
         }
+        migrateClaudePendingOperations()
         rebuildThreadLookupCaches()
     }
 

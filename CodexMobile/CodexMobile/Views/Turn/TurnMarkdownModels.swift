@@ -8,6 +8,7 @@ import Foundation
 
 enum MarkdownRenderProfile {
     case assistantProse
+    case claudeProse
     case fileChangeSystem
 }
 
@@ -16,6 +17,8 @@ extension MarkdownRenderProfile {
         switch self {
         case .assistantProse:
             return "assistantProse"
+        case .claudeProse:
+            return "claudeProse"
         case .fileChangeSystem:
             return "fileChangeSystem"
         }

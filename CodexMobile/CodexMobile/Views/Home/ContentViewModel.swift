@@ -181,7 +181,7 @@ final class ContentViewModel {
 
         let maxAttempts = reconnectAttemptLimitOverride ?? 50
 
-        // Keep retryable reconnects alive until the socket recovers or the pairing becomes invalid.
+        // Retry temporary failures up to this foreground attempt budget.
         while codex.shouldAutoReconnectOnForeground, attempt < maxAttempts {
 
             guard let fullURL = await preferredReconnectURL(codex: codex) else {
@@ -274,7 +274,7 @@ final class ContentViewModel {
             }
         }
 
-        // Exhausted all attempts — stop retrying but keep the saved pairing for next foreground cycle.
+        // Stop passive progress after the budget; keep the saved pairing for manual retry.
         if attempt >= maxAttempts {
             codex.shouldAutoReconnectOnForeground = false
             codex.connectionRecoveryState = .idle

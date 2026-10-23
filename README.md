@@ -128,6 +128,8 @@ open CodexMobile/CodexMobile.xcodeproj
 
 A paid developer account is not required for local installation. When renewing a build, keep the same Bundle ID and install over the existing app to preserve local state. Simulator builds are available, but do not prove lock-screen notification delivery.
 
+After the first installation, connect and unlock the iPhone, then double-click **[更新 CodexLink.command](更新%20CodexLink.command)** in the project root to update or renew signing. It rebuilds the current local working tree, including uncommitted changes, without replacing source files or reusing an old app. It reports the actual signing expiry and preserves app data and pairing. See the [installer guide](docs/setup.md#双击更新--免费签名续签) (Chinese).
+
 ### 4. Start the background service and pair
 
 Connect both devices to Tailscale, then run from the repository root:

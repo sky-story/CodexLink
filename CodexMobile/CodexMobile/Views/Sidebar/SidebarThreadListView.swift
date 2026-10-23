@@ -23,6 +23,12 @@ struct SidebarThreadListView: View {
     var onPinToggleThread: ((CodexThread) -> Void)? = nil
     var onArchiveToggleThread: ((CodexThread) -> Void)? = nil
     var onDeleteThread: ((CodexThread) -> Void)? = nil
+    var showsCodexThreads = true
+    var showsClaudeSection = false
+    var claudeSessions: [AgentSessionSummary] = []
+    var claudeError: String?
+    var onSelectClaudeSession: ((AgentSessionSummary) -> Void)? = nil
+    var onOpenClaudeSetup: (() -> Void)? = nil
     @Environment(CodexService.self) private var codex
     @AppStorage("sidebar.collapsedProjectGroupIDs") private var collapsedProjectGroupIDsStorage = ""
     @State private var expandedProjectGroupIDs: Set<String> = []
@@ -36,22 +42,28 @@ struct SidebarThreadListView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-
-                if threads.isEmpty && !isFiltering {
-                    Text(isConnected ? "No conversations" : "Connect to view conversations")
-                        .foregroundStyle(.secondary)
-                        .font(AppFont.subheadline())
-                        .padding(.horizontal, 16)
-                        .padding(.top, 20)
-                } else if groups.flatMap(\.threads).isEmpty && isFiltering {
-                    Text("No matching conversations")
-                        .foregroundStyle(.secondary)
-                        .font(AppFont.subheadline())
-                        .padding(.horizontal, 16)
-                        .padding(.top, 20)
-                } else {
-                    ForEach(groups) { group in
-                        groupSection(group)
+                if showsClaudeSection { claudeSection }
+                if showsCodexThreads {
+                    if showsClaudeSection {
+                        Text("Codex").font(AppFont.caption(weight: .semibold)).foregroundStyle(.secondary)
+                            .padding(.horizontal, 16).padding(.top, 16)
+                    }
+                    if threads.isEmpty && !isFiltering {
+                        Text(isConnected ? "No conversations" : "Connect to view conversations")
+                            .foregroundStyle(.secondary)
+                            .font(AppFont.subheadline())
+                            .padding(.horizontal, 16)
+                            .padding(.top, 20)
+                    } else if groups.flatMap(\.threads).isEmpty && isFiltering {
+                        Text("No matching conversations")
+                            .foregroundStyle(.secondary)
+                            .font(AppFont.subheadline())
+                            .padding(.horizontal, 16)
+                            .padding(.top, 20)
+                    } else {
+                        ForEach(groups) { group in
+                            groupSection(group)
+                        }
                     }
                 }
             }
@@ -81,6 +93,42 @@ struct SidebarThreadListView: View {
         .onChange(of: selectedSubagentAncestorIDs) { _, _ in
             revealSelectedThreadProjectGroup()
             revealSelectedSubagentAncestors()
+        }
+    }
+
+    @ViewBuilder
+    private var claudeSection: some View {
+        HStack {
+            Text("Claude").font(AppFont.caption(weight: .semibold)).foregroundStyle(.secondary)
+            Spacer()
+            if let onOpenClaudeSetup {
+                Button("接入说明", action: onOpenClaudeSetup).font(AppFont.caption())
+            }
+        }.padding(.horizontal, 16).padding(.vertical, 8)
+        if let claudeError {
+            Text(claudeError).font(AppFont.caption()).foregroundStyle(.red).padding(.horizontal, 16)
+        }
+        if claudeSessions.isEmpty {
+            Text(isFiltering ? "没有匹配的 Claude 会话" : "在 Mac 启动已接入的 Claude 会话后，会显示在这里。")
+                .font(AppFont.caption()).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 8)
+        }
+        ForEach(claudeSessions) { session in
+            Button { onSelectClaudeSession?(session) } label: {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(session.name).font(AppFont.subheadline(weight: .medium)).foregroundStyle(.primary).lineLimit(2)
+                    HStack(spacing: 8) {
+                        Text(session.project).lineLimit(1)
+                        Spacer(minLength: 4)
+                        Text(session.status.label)
+                            .foregroundStyle(session.status.needsAttention ? Color.orange : Color.secondary)
+                    }.font(AppFont.caption()).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("sidebar-claude-\(session.id.session)")
         }
     }
 

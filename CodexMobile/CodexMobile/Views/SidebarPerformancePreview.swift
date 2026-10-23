@@ -11,6 +11,8 @@ func configureSidebarPerformancePreview(_ service: CodexService) {
     service.isConnected = true
     service.isInitialized = true
     service.supportsSharedSessionControl = true
+    service.supportsClaudeChannels = true
+    service.relayMacDeviceId = "sidebar-preview-mac"
     service.lastNegotiatedSharedSession = true
     service.syncRealtimeEnabled = false
     service.threads = (0..<70).map { index in
@@ -57,9 +59,15 @@ func configureSidebarPerformancePreview(_ service: CodexService) {
         .object(["id": .string(thread.id), "name": .string(thread.displayTitle),
                  "cwd": .string(thread.cwd ?? "/demo"), "status": .object(["type": .string("idle")])])
     })
+    let claude = ClaudeSession(id: "sidebar-claude", generation: "g", name: "检查购物车流程", project: "storefront", phase: "approval", online: true, verified: true, updatedAt: 1_700_000_000_000, cwd: "/demo/storefront")
+    let permission = ClaudePermission(id: "sidebar-approval", tool: "Bash", description: "运行购物车测试", preview: "npm test -- cart", status: "pending", expiresAt: Date().addingTimeInterval(600).timeIntervalSince1970 * 1000)
+    func json<T: Encodable>(_ value: T) throws -> JSONValue { try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(value)) }
     service.requestTransportOverride = { method, _ in
         let result: JSONValue
         switch method {
+        case "claude/sessions": result = .object(["data": .array([try json(claude)])])
+        case "claude/snapshot":
+            result = try json(ClaudeSnapshot(session: claude, messages: [ClaudeChatMessage(id: "r", seq: 1, role: "assistant", text: "购物车逻辑已检查，请确认运行相关测试。", source: "channel", createdAt: claude.updatedAt)], permissions: [permission], receipts: [], nextBefore: nil))
         case "thread/read", "thread/resume": result = .object(["thread": threadJSON])
         case "remote/sync": result = .object(["approvals": .array([])])
         case "thread/list":

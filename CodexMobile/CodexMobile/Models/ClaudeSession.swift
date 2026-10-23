@@ -67,7 +67,7 @@ struct ClaudeCommandReceipt: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
-struct ClaudeSnapshot: Codable, Sendable {
+struct ClaudeSnapshot: Codable, Equatable, Sendable {
     let session: ClaudeSession
     let messages: [ClaudeChatMessage]
     let permissions: [ClaudePermission]

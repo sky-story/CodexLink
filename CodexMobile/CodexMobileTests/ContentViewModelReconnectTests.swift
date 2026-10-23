@@ -73,7 +73,7 @@ final class ContentViewModelReconnectTests: XCTestCase {
         XCTAssertEqual(service.lastErrorMessage, "Your trusted Mac is offline right now.")
     }
 
-    func testForegroundReconnectKeepsRetryIntentArmedAfterRetryableFailures() async {
+    func testForegroundReconnectStopsAfterBudgetAndKeepsPairingForManualRetry() async {
         let service = makeService()
         let viewModel = ContentViewModel()
         var attempts = 0
@@ -91,9 +91,23 @@ final class ContentViewModelReconnectTests: XCTestCase {
         await viewModel.attemptAutoReconnectOnForegroundIfNeeded(codex: service)
 
         XCTAssertEqual(attempts, 2)
-        XCTAssertTrue(service.shouldAutoReconnectOnForeground)
+        XCTAssertFalse(service.shouldAutoReconnectOnForeground, "An exhausted loop must stop showing passive reconnect progress")
+        XCTAssertEqual(service.lastErrorMessage, "Could not reconnect. Tap Reconnect to try again.")
+        XCTAssertEqual(service.connectionRecoveryState, .idle)
+        XCTAssertEqual(service.relaySessionId, "saved-session")
+        XCTAssertEqual(service.relayUrl, "wss://relay.local/relay")
+
+        viewModel.connectOverride = { codex, url in
+            attempts += 1
+            XCTAssertEqual(url, "wss://relay.local/relay/saved-session")
+            codex.isConnected = true
+            codex.isInitialized = true
+        }
+        await viewModel.toggleConnection(codex: service)
+        XCTAssertEqual(attempts, 3)
+        XCTAssertTrue(service.isConnected)
         XCTAssertNil(service.lastErrorMessage)
-        XCTAssertEqual(service.connectionRecoveryState, .retrying(attempt: 2, message: "Reconnecting..."))
+        XCTAssertFalse(viewModel.isAttemptingManualReconnect)
     }
 
     func testManualReconnectReResolvesReconnectURLBetweenRetryAttempts() async {

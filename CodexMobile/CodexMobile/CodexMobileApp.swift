@@ -59,8 +59,10 @@ struct CodexMobileApp: App {
                     SessionOverviewPreview()
                 } else if scene == "claude-list" {
                     NavigationStack { ClaudeSessionsView() }
+                } else if scene == "claude-reconnect" {
+                    ClaudeReconnectPreview()
                 } else if scene.hasPrefix("claude-") {
-                    NavigationStack { ClaudeConversationView(sessionID: "claude-demo", initialName: "示例：待办 App") }
+                    NavigationStack { ClaudeConversationView(server: codexService.sessionOverviewServerKey, sessionID: "claude-demo", initialName: "示例：待办 App") }
                 } else if scene == "sessions" || scene == "sidebar-performance" {
                     ContentView()
                 } else {
@@ -111,9 +113,9 @@ struct CodexMobileApp: App {
 @MainActor
 private func configureDocumentationPreview(_ service: CodexService, scene: String) {
     let threadID = "docs-demo", turnID = "docs-turn"
-    let isRunning = scene != "completed" && scene != "new-chat"
-    let userText = "请检查示例待办 App 的空列表状态，并给出修改建议。"
-    let assistantText = isRunning
+    let isRunning = scene != "completed" && scene != "new-chat" && scene != "markdown"
+    let userText = scene == "markdown" ? MarkdownDocumentationSample.prompt : "请检查示例待办 App 的空列表状态，并给出修改建议。"
+    let assistantText = scene == "markdown" ? MarkdownDocumentationSample.answer : isRunning
         ? "正在检查空列表视图和已有测试。\n\n我会先确认首次打开和清空列表后的行为，再整理修改建议。"
         : "已完成示例检查。\n\n- 空列表显示清晰的引导文案。\n- 保留添加按钮，便于创建第一条待办。\n- 覆盖首次打开与清空列表两种情况。\n\n你可以回到 Mac，继续同一个会话。"
     UserDefaults.standard.set(true, forKey: "codex.hasSeenOnboarding")

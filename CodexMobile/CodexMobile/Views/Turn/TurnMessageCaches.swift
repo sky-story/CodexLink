@@ -1121,7 +1121,7 @@ enum DiffBlockDetectionCache {
 
     static func isDiffBlock(code: String, profile: MarkdownRenderProfile) -> Bool {
         switch profile {
-        case .assistantProse, .fileChangeSystem:
+        case .assistantProse, .claudeProse, .fileChangeSystem:
             break
         }
 

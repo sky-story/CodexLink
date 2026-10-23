@@ -1,4 +1,5 @@
 import XCTest
+import Observation
 @testable import CodexMobile
 
 @MainActor
@@ -380,6 +381,72 @@ final class SessionReliabilityTests: XCTestCase {
         XCTAssertEqual(Set(rows.compactMap(\.projectPath)), ["/repo/worktree-a"])
         service.isConnected = false
         XCTAssertTrue(service.sessionSummaries(claudeSessions: [claude]).allSatisfy { $0.status == .offline })
+    }
+
+    func testOverviewDoesNotObserveStreamingTranscript() {
+        let service = service()
+        service.threads = [CodexThread(id: "stream", title: "Streaming")]
+        service.messagesByThread["stream"] = [CodexMessage(id: "reply", threadId: "stream", role: .assistant, text: "first")]
+        service.refreshThreadTimelineState(for: "stream")
+        withObservationTracking {
+            _ = service.sessionSummaries(claudeSessions: [])
+        } onChange: {
+            XCTFail("Streaming text must not invalidate session summaries")
+        }
+        service.messagesByThread["stream"]?[0].text += " second"
+        service.refreshThreadTimelineState(for: "stream")
+        XCTAssertEqual(service.sessionSummaries(claudeSessions: []).first?.status, .idle)
+    }
+
+    func testOverviewUpdatesWhenNewInputPromptArrivesAndIsCleared() {
+        let service = service()
+        service.threads = [CodexThread(id: "input", title: "Question")]
+        let changed = expectation(description: "new input prompt updates overview")
+        withObservationTracking {
+            _ = service.sessionSummaries(claudeSessions: [])
+        } onChange: { changed.fulfill() }
+        service.messagesByThread["input"] = [CodexMessage(threadId: "input", role: .system, kind: .userInputPrompt, text: "Choose")]
+        service.refreshThreadTimelineState(for: "input")
+        XCTAssertEqual(service.sessionSummaries(claudeSessions: []).first?.status, .input)
+        service.messagesByThread["input"] = []
+        service.refreshThreadTimelineState(for: "input")
+        XCTAssertEqual(service.sessionSummaries(claudeSessions: []).first?.status, .idle)
+        wait(for: [changed], timeout: 1)
+    }
+
+    func testResolvingBackgroundInputPromptClearsOverviewStatus() {
+        for activeThreadID: String? in ["visible", nil] {
+            for threadHint: String? in ["background", nil] {
+                let service = service()
+                service.threads = [CodexThread(id: "visible"), CodexThread(id: "background")]
+                service.activeThreadId = activeThreadID
+                let request = CodexStructuredUserInputRequest(requestID: .string("request"), questions: [])
+                service.upsertStructuredUserInputPrompt(threadId: "background", turnId: "turn", itemId: "input", request: request)
+                XCTAssertTrue(service.inputRequiredThreadIDs.contains("background"))
+                let revision = service.messageRevision(for: "background")
+                service.removeStructuredUserInputPrompt(requestID: request.requestID, threadIdHint: threadHint)
+                XCTAssertFalse(service.inputRequiredThreadIDs.contains("background"))
+                XCTAssertEqual(service.sessionSummaries(claudeSessions: []).first { $0.id.session == "background" }?.status, .idle)
+                XCTAssertTrue(service.timelineState(for: "background").renderSnapshot.planMatchingMessages.isEmpty)
+                XCTAssertGreaterThan(service.messageRevision(for: "background"), revision)
+                XCTAssertEqual(service.activeThreadId, activeThreadID)
+            }
+        }
+    }
+
+    func testLeavingBackgroundPlanModeClearsOnlyItsInputStatus() {
+        let service = service()
+        service.threads = [CodexThread(id: "visible"), CodexThread(id: "background")]
+        service.activeThreadId = "visible"
+        for id in ["visible", "background"] {
+            service.upsertStructuredUserInputPrompt(threadId: id, turnId: "turn-\(id)", itemId: "input-\(id)",
+                request: CodexStructuredUserInputRequest(requestID: .string("request-\(id)"), questions: []))
+        }
+        service.removeAllStructuredUserInputPrompts(threadId: "background")
+        XCTAssertEqual(service.inputRequiredThreadIDs, ["visible"])
+        XCTAssertEqual(service.sessionSummaries(claudeSessions: []).first { $0.id.session == "background" }?.status, .idle)
+        XCTAssertTrue(service.timelineState(for: "background").renderSnapshot.planMatchingMessages.isEmpty)
+        XCTAssertFalse(service.timelineState(for: "visible").renderSnapshot.planMatchingMessages.isEmpty)
     }
 
     func testClaudeUnreadUsesDisplayedReplySequenceAndStableMacIdentity() {

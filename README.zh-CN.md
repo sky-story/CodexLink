@@ -130,6 +130,8 @@ open CodexMobile/CodexMobile.xcodeproj
 
 免费签名不要求购买开发者账号；重新签名时尽量沿用自己的 Bundle ID 并覆盖安装，避免卸载丢失本地状态。暂不体验真机时可选 iPhone Simulator，但模拟器运行不代表锁屏推送通过。
 
+完成首次安装后，日后更新代码或续签可连接并解锁手机，双击根目录的 **[更新 CodexLink.command](更新%20CodexLink.command)**。每次构建当前本地代码（包括未提交修改），不覆盖工作区、不复用旧安装包；显示真实签名到期时间并保留数据和配对。详见[更新工具说明](docs/setup.md#双击更新--免费签名续签)。
+
 ### 4. 启动 Mac 后台服务并配对
 
 先让 Mac 与 iPhone 的 Tailscale 都在线，再在项目根目录运行：

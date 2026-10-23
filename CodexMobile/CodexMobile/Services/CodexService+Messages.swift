@@ -159,6 +159,7 @@ extension CodexService {
 
     // Prunes service-owned render caches so removed/archived threads do not keep stale snapshots alive.
     func removeThreadTimelineState(for threadId: String) {
+        if inputRequiredThreadIDs.contains(threadId) { inputRequiredThreadIDs.remove(threadId) }
         threadTimelineStateByThread.removeValue(forKey: threadId)
         stoppedTurnIDsByThread.removeValue(forKey: threadId)
         messageIndexCacheByThread.removeValue(forKey: threadId)
@@ -180,6 +181,7 @@ extension CodexService {
     // Clears every service-owned timeline cache during global teardown.
     func removeAllThreadTimelineState() {
         threadTimelineStateByThread.removeAll()
+        if !inputRequiredThreadIDs.isEmpty { inputRequiredThreadIDs.removeAll() }
         stoppedTurnIDsByThread.removeAll()
         messageIndexCacheByThread.removeAll()
         latestAssistantOutputByThread.removeAll()
@@ -1424,6 +1426,7 @@ extension CodexService {
 
             if threadMessages.count != previousCount {
                 messagesByThread[threadId] = threadMessages
+                updateCurrentOutput(for: threadId)
                 didMutate = true
             }
         }
@@ -1433,9 +1436,6 @@ extension CodexService {
         }
 
         persistMessages()
-        if let activeThreadId {
-            updateCurrentOutput(for: activeThreadId)
-        }
     }
 
     // Clears all unresolved structured prompts in a thread when the user exits native plan mode.
@@ -1455,9 +1455,7 @@ extension CodexService {
 
         messagesByThread[threadId] = threadMessages
         persistMessages()
-        if let activeThreadId {
-            updateCurrentOutput(for: activeThreadId)
-        }
+        updateCurrentOutput(for: threadId)
     }
 
     // Persists a hidden push-reset marker across all threads bound to the same repo.
@@ -3298,6 +3296,11 @@ extension CodexService {
         let latestTurnTerminalState = latestTurnTerminalStateByThread[threadId]
         let projectedMessages = TurnTimelineReducer.project(messages: projectionSourceMessages).messages
         let planMatchingMessages = messages.filter { $0.kind == .userInputPrompt }
+        let hasUserInputPrompt = !planMatchingMessages.isEmpty
+        if hasUserInputPrompt != inputRequiredThreadIDs.contains(threadId) {
+            if hasUserInputPrompt { inputRequiredThreadIDs.insert(threadId) }
+            else { inputRequiredThreadIDs.remove(threadId) }
+        }
         let completedTurnIDs = Set(
             projectedMessages.compactMap { message -> String? in
                 guard let turnId = message.turnId,

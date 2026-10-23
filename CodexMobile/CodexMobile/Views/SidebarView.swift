@@ -19,8 +19,11 @@ struct SidebarView: View {
     let onClose: () -> Void
     let onOpenThread: (CodexThread) -> Void
     var onOpenSessions: (() -> Void)? = nil
+    var onOpenClaudeSession: ((AgentSessionSummary) -> Void)? = nil
 
     @State private var searchText = ""
+    @State private var selectedProvider: AgentSessionProvider?
+    @State private var showClaudeHelp = false
     @State private var isCreatingThread = false
     @State private var groupedThreads: [SidebarThreadGroup] = []
     @State private var isShowingNewChatProjectPicker = false
@@ -49,7 +52,9 @@ struct SidebarView: View {
                         Label("会话总览", systemImage: "square.stack.3d.up")
                         Spacer()
                         Image(systemName: "chevron.right").font(.caption)
-                    }.padding(12)
+                    }
+                    .padding(12)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
@@ -62,14 +67,25 @@ struct SidebarView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 6)
 
-            SidebarNewChatButton(
-                isCreatingThread: isCreatingThread,
-                isEnabled: canCreateThread,
-                statusMessage: nil,
-                action: handleNewChatButtonTap
-            )
+            Picker("会话类型", selection: $selectedProvider) {
+                Text("全部").tag(AgentSessionProvider?.none)
+                Text("Codex").tag(AgentSessionProvider?.some(.codex))
+                Text("Claude").tag(AgentSessionProvider?.some(.claude))
+            }
+            .pickerStyle(.segmented)
             .padding(.horizontal, 16)
             .padding(.bottom, 10)
+
+            if selectedProvider != .claude {
+                SidebarNewChatButton(
+                    isCreatingThread: isCreatingThread,
+                    isEnabled: canCreateThread,
+                    statusMessage: nil,
+                    action: handleNewChatButtonTap
+                )
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
+            }
 
             SidebarThreadListView(
                 isFiltering: !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -112,10 +128,21 @@ struct SidebarView: View {
                 },
                 onDeleteThread: { thread in
                     threadPendingDeletion = thread
-                }
+                },
+                showsCodexThreads: selectedProvider != .claude,
+                showsClaudeSection: selectedProvider != .codex && (codex.supportsClaudeChannels || !codex.cachedClaudeSessions.isEmpty || selectedProvider == .claude),
+                claudeSessions: filteredClaudeSessions,
+                claudeError: codex.cachedClaudeSessionsError,
+                onSelectClaudeSession: { session in
+                    searchText = ""
+                    onOpenClaudeSession?(session)
+                },
+                onOpenClaudeSetup: { showClaudeHelp = true }
             )
             .refreshable {
-                await refreshThreads()
+                async let threads: Void = refreshThreads()
+                async let claude: Void = codex.refreshClaudeSessions(force: true)
+                _ = await (threads, claude)
             }
 
             HStack(spacing: 10) {
@@ -134,10 +161,13 @@ struct SidebarView: View {
         }
         .frame(maxHeight: .infinity)
         .background(Color(.systemBackground))
+        .syncClaudeSessionList(isEnabled: isVisible)
         .task {
             debugSidebarLog("task start visible=\(isVisible) threadCount=\(codex.threads.count)")
             rebuildGroupedThreads()
             rebuildCachedSidebarState()
+            // Prewarm lightweight Claude metadata alongside the already-mounted drawer.
+            await codex.refreshClaudeSessions()
             if codex.isConnected, codex.threads.isEmpty {
                 await refreshThreads()
             }
@@ -170,7 +200,8 @@ struct SidebarView: View {
             debugSidebarLog("visibility changed visible=\(visible)")
         }
         .overlay {
-            if SidebarThreadsLoadingPresentation.shouldShowOverlay(
+            if selectedProvider != .claude, codex.cachedClaudeSessions.isEmpty,
+               SidebarThreadsLoadingPresentation.shouldShowOverlay(
                 isLoadingThreads: codex.isLoadingThreads,
                 threadCount: codex.threads.count
             ) {
@@ -193,6 +224,7 @@ struct SidebarView: View {
                 }
             )
         }
+        .sheet(isPresented: $showClaudeHelp) { ClaudeConnectionHelpView() }
         .confirmationDialog(
             "Archive \"\(projectGroupPendingArchive?.label ?? "project")\"?",
             isPresented: Binding(
@@ -248,6 +280,13 @@ struct SidebarView: View {
     }
 
     // MARK: - Actions
+
+    private var filteredClaudeSessions: [AgentSessionSummary] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return codex.claudeSessionSummaries(codex.cachedClaudeSessions).filter {
+            query.isEmpty || "\($0.name) \($0.project) \($0.projectPath ?? "") Claude".localizedCaseInsensitiveContains(query)
+        }
+    }
 
     private func refreshThreads() async {
         guard codex.isConnected else { return }
