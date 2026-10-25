@@ -26,14 +26,15 @@ enum TurnConnectionRecoverySnapshotBuilder {
 
         let trimmedError = lastErrorMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Once the silent wake attempt has already failed, prefer the explicit wake fallback over passive retry copy.
+        // An interrupted connection alone is not evidence of display sleep.
+        // Keep reconnect as the primary action even when display wake is available.
         if showsWakeSavedMacDisplayAction {
             return ConnectionRecoverySnapshot(
                 summary: trimmedError?.isEmpty == false
                     ? trimmedError ?? ""
-                    : "Wake the computer screen to keep this chat in sync.",
+                    : "Connection to your computer was interrupted. Try reconnecting.",
                 status: .interrupted,
-                trailingStyle: .action("Wake Screen")
+                trailingStyle: .action("Reconnect")
             )
         }
 

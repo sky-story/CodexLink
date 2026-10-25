@@ -23,6 +23,8 @@ Bridge 的 `client-protocol.js` 统一生成直接运行时和手机重连快捷
 
 连接代次绑定 RPC 响应与列表同步，已退役连接不能发布新状态。初始化同时设置 15 秒无入站消息超时与 60 秒总就绪期限，并在启用共享控制前读取待处理请求。恢复只读取快照和回执，不重发结果未知的指令。
 
+`remote/status.params.connected` 表示 Bridge 到 Codex daemon 的就绪状态，独立于手机到 Bridge 的加密连接。`remote/sync` 响应新增可选 `connected`，只有 daemon 的初始化握手完成后为 `true`；使用 `snapshotOnly: true` 可在手机错过通知时读取当前状态。旧 Bridge 缺少该字段时，手机通过只读 `thread/loaded/list` 探测恢复，不启动或重发任务。过期的读响应不能覆盖更新的断线通知，Codex 上游断线也不重置 Claude 连接。
+
 启动、前台和主动刷新复用同一列表读取；相同列表不重新计算全部时间线。支持轻量 Turn 状态的 Bridge 在后台会话完成时只更新状态，完整历史在打开会话后恢复。导航到会话总览、Claude 或设置时，停止所选 Codex 聊天的详细轮询；实时事件、回执和通知仍按原路径处理。
 
 会话总览按项目路径分组，优先展示待审批、待输入、失败和完成未读。身份包含 Mac、Agent 类型和原会话 ID，避免不同 Agent 的同名 ID 混淆。Claude 摘要增加可选 `cwd`、`lastAssistantSeq`；已读位置按 Mac 身份保存在手机，仅在回复实际加载后推进。各 Agent 继续进入原有会话页面，使用各自真实支持的操作。

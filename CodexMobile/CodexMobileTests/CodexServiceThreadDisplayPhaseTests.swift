@@ -66,6 +66,8 @@ final class CodexServiceThreadDisplayPhaseTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suiteName) ?? .standard
         defaults.removePersistentDomain(forName: suiteName)
         let service = CodexService(defaults: defaults)
+        service.isConnected = true
+        service.isInitialized = true
         Self.retainedServices.append(service)
         return service
     }

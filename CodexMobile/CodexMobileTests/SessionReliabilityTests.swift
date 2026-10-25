@@ -556,6 +556,166 @@ final class SessionReliabilityTests: XCTestCase {
         XCTAssertEqual(service.pendingApprovals.first?.threadId, "a")
     }
 
+    func testSharedComposerNeverLabelsOfflineOrUnreadySessionLive() {
+        let service = service()
+        service.applyBridgeCapabilities(v1)
+        service.syncRealtimeEnabled = false
+        service.sharedControlStatus["chat"] = "Queued on Mac"
+        service.isConnected = false
+        XCTAssertTrue(service.sharedSessionStatusText(threadID: "chat").contains("离线"))
+        XCTAssertFalse(service.isSharedSessionReady)
+        service.isConnected = true; service.isInitialized = false
+        XCTAssertFalse(service.sharedSessionStatusText(threadID: "chat").contains("Live"))
+        service.isInitialized = true
+        service.handleNotification(method: "remote/status", params: .object(["connected": .bool(false)]))
+        XCTAssertTrue(service.isConnected, "The Bridge and Claude transport stays connected")
+        XCTAssertTrue(service.isInitialized)
+        XCTAssertTrue(service.supportsClaudeChannels)
+        XCTAssertFalse(service.isSharedSessionReady)
+        XCTAssertTrue(service.sharedSessionStatusText(threadID: "chat").contains("正在恢复 Codex"))
+        service.handleNotification(method: "remote/status", params: .object(["connected": .bool(true)]))
+        XCTAssertEqual(service.sharedSessionStatusText(threadID: "chat"), "Queued on Mac")
+    }
+
+    func testUpstreamDisconnectPreservesMessagesAndBlocksCommands() async {
+        let service = service()
+        service.applyBridgeCapabilities(v1); service.syncRealtimeEnabled = false
+        let message = CodexMessage(threadId: "chat", role: .assistant, text: "Still here")
+        service.messagesByThread["chat"] = [message]
+        service.handleNotification(method: "remote/status", params: .object(["connected": .bool(false)]))
+        service.requestTransportOverride = { _, _ in XCTFail("No command may be sent"); throw CodexServiceError.disconnected }
+        do { try await service.sharedControl(threadID: "chat", action: "queue", text: "once"); XCTFail() } catch {}
+        XCTAssertEqual(service.messages(for: "chat"), [message])
+        XCTAssertEqual(service.threadDisplayPhase(threadId: "chat"), .ready)
+        XCTAssertFalse(service.defaults.dictionaryRepresentation().keys.contains { $0.hasPrefix("shared-control-pending-") })
+    }
+
+    func testDaemonRPCErrorMovesEmptyHistoryOutOfEndlessLoading() async {
+        let service = service()
+        service.applyBridgeCapabilities(v1); service.syncRealtimeEnabled = false
+        service.threads = [CodexThread(id: "chat", title: "Existing conversation", preview: "old reply")]
+        service.requestTransportOverride = { _, _ in
+            throw CodexServiceError.rpcError(RPCError(code: -32000, message: "Codex daemon disconnected; request was not sent"))
+        }
+        do { _ = try await service.loadThreadHistoryIfNeeded(threadId: "chat"); XCTFail() } catch {}
+        XCTAssertEqual(service.sharedDaemonConnected, false)
+        XCTAssertEqual(service.threadDisplayPhase(threadId: "chat"), .waitingForConnection)
+        XCTAssertFalse(service.loadingThreadIDs.contains("chat"))
+        XCTAssertFalse(service.hydratedThreadIDs.contains("chat"))
+    }
+
+    func testMissedReadyNotificationRecoversHistoryThroughLegacyReadOnlyProbe() async throws {
+        let service = service()
+        service.applyBridgeCapabilities(v1); service.syncRealtimeEnabled = false
+        service.threads = [CodexThread(id: "chat", title: "Existing conversation", preview: "old reply")]
+        service.activeThreadId = "chat"
+        service.applySharedDaemonStatus(false)
+        var methods: [String] = []
+        let historyRead = expectation(description: "history recovered without reopening")
+        service.requestTransportOverride = { method, _ in
+            methods.append(method)
+            switch method {
+            case "remote/sync": return RPCMessage(id: .integer(1), result: .object(["approvals": .array([])]))
+            case "thread/loaded/list": return RPCMessage(id: .integer(1), result: .object(["data": .array([])]))
+            case "thread/read":
+                historyRead.fulfill()
+                return RPCMessage(id: .integer(1), result: .object(["thread": .object(self.syncHistoryFixture())]))
+            default: XCTFail("Unexpected recovery method: \(method)"); throw CodexServiceError.disconnected
+            }
+        }
+        service.syncRealtimeEnabled = true
+        service.isBootstrappingConnectionSync = true
+        defer { service.stopSyncLoop(); service.stopSharedDaemonRecovery() }
+        service.startSharedDaemonRecoveryIfNeeded()
+        await service.sharedDaemonRecoveryTask?.value
+        await fulfillment(of: [historyRead], timeout: 2)
+        _ = try await service.threadHistoryLoadTaskByThreadID["chat"]?.value
+        XCTAssertEqual(service.sharedDaemonConnected, true)
+        XCTAssertEqual(service.threadDisplayPhase(threadId: "chat"), .ready)
+        XCTAssertFalse(service.messages(for: "chat").isEmpty)
+        XCTAssertEqual(methods, ["remote/sync", "thread/loaded/list", "thread/read"])
+    }
+
+    func testSnapshotReportsUnavailableDaemonEvenWhenBridgeHandshakeSucceeded() async throws {
+        let service = service()
+        service.applyBridgeCapabilities(v1); service.syncRealtimeEnabled = false
+        service.requestTransportOverride = { method, _ in
+            XCTAssertEqual(method, "remote/sync")
+            return RPCMessage(id: .integer(1), result: .object(["connected": .bool(false), "approvals": .array([])]))
+        }
+        try await service.restoreSharedApprovals()
+        XCTAssertFalse(service.isSharedSessionReady)
+        XCTAssertTrue(service.isConnected)
+        XCTAssertTrue(service.isInitialized)
+    }
+
+    func testLateUpstreamReadCannotUndoNewerDisconnectNotification() async throws {
+        let service = service()
+        service.applyBridgeCapabilities(v1); service.syncRealtimeEnabled = false
+        service.applySharedDaemonStatus(true)
+        let started = expectation(description: "read started")
+        var release: CheckedContinuation<RPCMessage, Never>?
+        service.requestTransportOverride = { _, _ in
+            await withCheckedContinuation { release = $0; started.fulfill() }
+        }
+        let oldRead = Task { try await service.sendRequest(method: "thread/loaded/list", params: nil) }
+        await fulfillment(of: [started], timeout: 2)
+        service.handleNotification(method: "remote/status", params: .object(["connected": .bool(false)]))
+        release?.resume(returning: RPCMessage(id: .integer(1), result: .object(["data": .array([])])))
+        _ = try await oldRead.value
+        XCTAssertEqual(service.sharedDaemonConnected, false)
+    }
+
+    func testBridgeOnlySuccessCannotPretendCodexHasRecovered() async throws {
+        let service = service()
+        service.applyBridgeCapabilities(v1); service.syncRealtimeEnabled = false
+        service.applySharedDaemonStatus(false)
+        service.requestTransportOverride = { _, _ in RPCMessage(id: .integer(1), result: .object(["data": .array([])])) }
+        _ = try await service.sendRequest(method: "claude/sessions", params: nil)
+        XCTAssertEqual(service.sharedDaemonConnected, false)
+        await service.disconnect()
+        XCTAssertNil(service.sharedDaemonConnected)
+        XCTAssertNil(service.sharedDaemonRecoveryTask)
+    }
+
+    func testHistoryFailureIsRetryableAndSuccessfulReadClearsIt() async throws {
+        let service = service()
+        service.threads = [CodexThread(id: "chat", title: "Existing conversation", preview: "old reply")]
+        service.requestTransportOverride = { _, _ in throw CodexServiceError.invalidResponse("Temporary history failure") }
+        do { _ = try await service.loadThreadHistoryIfNeeded(threadId: "chat"); XCTFail() } catch {}
+        guard case .failed = service.threadDisplayPhase(threadId: "chat") else { return XCTFail("Must expose retry, not loading") }
+        service.requestTransportOverride = { _, _ in RPCMessage(id: .integer(1), result: .object(["thread": .object(self.syncHistoryFixture())])) }
+        _ = try await service.loadThreadHistoryIfNeeded(threadId: "chat")
+        XCTAssertNil(service.threadHistoryErrors["chat"])
+        XCTAssertEqual(service.threadDisplayPhase(threadId: "chat"), .ready)
+    }
+
+    func testGenericConnectionLossOffersReconnectWithoutClaimingScreenSleep() {
+        let snapshot = TurnConnectionRecoverySnapshotBuilder.makeSnapshot(hasReconnectCandidate: true, isConnected: false,
+            secureConnectionState: .trustedMac, showsWakeSavedMacDisplayAction: true,
+            isWakingMacDisplayRecovery: false, isConnecting: false, shouldAutoReconnectOnForeground: true,
+            isRetryingConnectionRecovery: true, lastErrorMessage: nil)
+        XCTAssertEqual(snapshot?.trailingStyle, .action("Reconnect"))
+        XCTAssertFalse(snapshot?.summary.contains("Wake") == true)
+    }
+
+    func testCancelledSettingsRefreshDoesNotLeaveAnErrorInTheRecoveredComposer() async {
+        let service = service()
+        service.applyBridgeCapabilities(v1); service.syncRealtimeEnabled = false
+        service.applySharedSettings(threadID: "chat", object: ["model": .string("fixture-model")])
+        let started = expectation(description: "old settings read started")
+        service.requestTransportOverride = { _, _ in
+            started.fulfill()
+            try await Task.sleep(for: .seconds(60))
+            throw CancellationError()
+        }
+        let old = Task { await service.refreshSharedSettings(threadID: "chat") }
+        await fulfillment(of: [started], timeout: 2)
+        old.cancel(); await old.value
+        XCTAssertNil(service.sharedSettingsError["chat"])
+        XCTAssertEqual(service.sharedSessionSettings["chat"]?.model, "fixture-model")
+    }
+
     func testOverviewKeepsProvidersDistinctAndPrioritizesAttention() {
         let service = service()
         service.supportsClaudeChannels = true

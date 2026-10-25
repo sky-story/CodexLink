@@ -89,6 +89,63 @@ final class CodexMobileUITests: XCTestCase {
         XCTAssertEqual(field.value as? String, "sidebar-draft-retained")
     }
 
+    func testCodexDeferredHistoryIsVisibleAfterFirstOpenAndForeground() {
+        let app = XCUIApplication()
+        app.launchEnvironment["CODEX_REMOTE_DOCS_SCENE"] = "sidebar-deferred-history"
+        app.launchEnvironment["CODEX_REMOTE_TEST_THREAD"] = "sidebar-demo"
+        app.launch()
+
+        let timeline = app.scrollViews["turn.timeline.scrollview"]
+        XCTAssertTrue(timeline.waitForExistence(timeout: 20))
+        let tail = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "SIDEBAR_TAIL_MARKER")).firstMatch
+        let visibleTail = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            tail.exists && tail.isHittable && timeline.frame.intersects(tail.frame)
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [visibleTail], timeout: 15), .completed,
+                       "A history node in the accessibility tree is insufficient: the latest reply must be on screen")
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        let restoredTail = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            tail.exists && tail.isHittable && timeline.frame.intersects(tail.frame)
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [restoredTail], timeout: 10), .completed)
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "CancellationError")).firstMatch.exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Codex delayed history visible after foreground"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    func testCodexDaemonRecoveryLoadsHistoryAndPreservesDraftWithoutReopening() {
+        let app = XCUIApplication()
+        app.launchEnvironment["CODEX_REMOTE_DOCS_SCENE"] = "sidebar-recovery"
+        app.launchEnvironment["CODEX_REMOTE_TEST_THREAD"] = "sidebar-demo"
+        app.launch()
+        XCTAssertTrue(app.staticTexts["等待连接恢复"].waitForExistence(timeout: 10))
+        let footer = app.staticTexts["shared-thread-sidebar-demo"]
+        XCTAssertTrue(footer.label.contains("正在恢复 Codex"))
+        XCTAssertFalse(app.buttons["Queue"].isEnabled)
+        app.buttons["恢复 Codex（模拟）"].tap()
+        let timeline = app.scrollViews["turn.timeline.scrollview"]
+        let tail = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "SIDEBAR_TAIL_MARKER")).firstMatch
+        let visibleTail = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            tail.exists && tail.isHittable && timeline.frame.intersects(tail.frame)
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [visibleTail], timeout: 20), .completed)
+        let field = app.descendants(matching: .any)["shared-message"].firstMatch
+        field.tap(); field.typeText("recovery-draft")
+        app.buttons["断开 Codex（模拟）"].tap()
+        XCTAssertFalse(footer.label.contains("Live"))
+        XCTAssertFalse(app.buttons["Queue"].isEnabled)
+        XCTAssertEqual(field.value as? String, "recovery-draft")
+        XCTAssertTrue(tail.exists, "Existing messages must survive a daemon outage")
+        app.buttons["恢复 Codex（模拟）"].tap()
+        XCTAssertEqual(field.value as? String, "recovery-draft")
+        XCTAssertTrue(app.buttons["Queue"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Queue"].isEnabled)
+    }
+
     func testClaudeDraftSurvivesSameMacReconnect() {
         let app = XCUIApplication()
         app.launchEnvironment["CODEX_REMOTE_DOCS_SCENE"] = "claude-reconnect"

@@ -17,7 +17,10 @@ struct CodexMobileApp: App {
         let service = CodexService()
 #if DEBUG && targetEnvironment(simulator)
         if let scene = ProcessInfo.processInfo.environment["CODEX_REMOTE_DOCS_SCENE"] {
-            if scene == "sidebar-performance" || scene == "sidebar-audit" { configureSidebarPerformancePreview(service) }
+            if ["sidebar-performance", "sidebar-audit", "sidebar-deferred-history", "sidebar-recovery"].contains(scene) {
+                configureSidebarPerformancePreview(service, deferredHistory: scene == "sidebar-deferred-history" || scene == "sidebar-recovery")
+                if scene == "sidebar-recovery" { service.sharedDaemonConnected = false }
+            }
             else if scene == "agent-overview" { configureSessionOverviewPreview(service) }
             else if scene.hasPrefix("claude-") { configureClaudeDocumentationPreview(service, scene: scene) }
             else { configureDocumentationPreview(service, scene: scene) }
@@ -71,7 +74,9 @@ struct CodexMobileApp: App {
                     NavigationStack { ClaudeConversationView(server: codexService.sessionOverviewServerKey, sessionID: "claude-demo", initialName: "示例：待办 App") }
                 } else if scene == "sidebar-audit" {
                     SidebarAuditPreview()
-                } else if scene == "sessions" || scene == "sidebar-performance" {
+                } else if scene == "sidebar-recovery" {
+                    SidebarRecoveryPreview()
+                } else if scene == "sessions" || scene == "sidebar-performance" || scene == "sidebar-deferred-history" {
                     ContentView()
                 } else {
                     NavigationStack {

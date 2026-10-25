@@ -2,7 +2,7 @@
 // Never enables Tailscale, exposes a public listener, or starts a Codex runtime.
 const fs = require('node:fs');
 const net = require('node:net');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, execFile } = require('node:child_process');
 const { loadPrivatePush, privateRelayPushOptions, privatePushStatus } = require('./private-push');
 
 function addressFromStatus(status) {
@@ -10,42 +10,77 @@ function addressFromStatus(status) {
   return (status.TailscaleIPs || []).find(ip => net.isIPv4(ip) &&
     ip.split('.')[0] === '100' && Number(ip.split('.')[1]) >= 64 && Number(ip.split('.')[1]) <= 127) || null;
 }
-function readTailscaleAddress({ exec = execFileSync, exists = fs.existsSync, env = process.env } = {}) {
+function tailscaleCommand({ exists = fs.existsSync, env = process.env } = {}) {
   const appCLI = '/Applications/Tailscale.app/Contents/MacOS/Tailscale';
   // The bundled Mac binary treats launchd's service name as a GUI/XPC launch and
   // returns no CLI output. Remove only this inherited hint for the child process.
   const childEnv = { ...env };
   delete childEnv.XPC_SERVICE_NAME;
   childEnv.TAILSCALE_BE_CLI = '1';
-  const output = exec(exists(appCLI) ? appCLI : 'tailscale', ['status', '--json'], {
-    encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'], env: childEnv,
+  return [exists(appCLI) ? appCLI : 'tailscale', ['status', '--json'], {
+    encoding: 'utf8', timeout: 10000, killSignal: 'SIGKILL', maxBuffer: 4 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'], env: childEnv,
+  }];
+}
+function parseAddress(output) {
+  const status = JSON.parse(output);
+  if (!status || typeof status.BackendState !== 'string') throw new Error('Invalid Tailscale status');
+  return addressFromStatus(status);
+}
+function readTailscaleAddress({ exec = execFileSync, ...options } = {}) {
+  return parseAddress(exec(...tailscaleCommand(options)));
+}
+// The service must keep forwarding frames while the Mac app answers its CLI probe.
+function readTailscaleAddressAsync({ exec = execFile, ...options } = {}) {
+  return new Promise((resolve, reject) => {
+    exec(...tailscaleCommand(options), (error, output) => {
+      if (error) { reject(error); return; }
+      try { resolve(parseAddress(output)); } catch (error) { reject(error); }
+    });
   });
-  return addressFromStatus(JSON.parse(output));
 }
 function startPrivateNetwork({
   config, startBridge, publishStatus = () => {}, onPairingSession,
-  readAddress = readTailscaleAddress,
+  readAddress = readTailscaleAddressAsync,
   createRelay = options => require('../../relay/server').createRelayServer(options),
   readPush = loadPrivatePush,
   pushOptions = privateRelayPushOptions,
   reportPush = status => console.log(`[codex-remote] private push: ${JSON.stringify(status)}`),
+  reportError = message => console.warn(`[codex-remote] ${new Date().toISOString()} pid=${process.pid} ${message}`),
   schedule = fn => setInterval(fn, 15000), cancel = clearInterval,
   exit = code => process.exit(code),
 }) {
   const port = config.privateRelayPort ?? 9100;
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid private Relay port');
-  let address = null, relay, timer, stopped = false, starting = false;
+  let address = null, relay, timer, stopped = false, starting = false, checking = false, probeFailures = 0;
   function fail(message) {
     if (stopped) return;
     stopped = true; cancel(timer);
+    reportError(message);
     publishStatus({ state: 'error', connectionStatus: 'disconnected', pid: process.pid, lastError: message });
     // launchd restarts with a fresh binding. Only this network client exits, never Codex.
     exit(1);
   }
-  function check() {
-    if (stopped || starting) return;
-    let next, unavailable = '';
-    try { next = readAddress(); } catch (error) { next = null; unavailable = ` (${error.code || error.name || 'CLI error'})`; }
+  async function check() {
+    if (stopped || starting || checking) return;
+    checking = true;
+    let next;
+    try {
+      next = await readAddress();
+      probeFailures = 0;
+    } catch (error) {
+      if (stopped) return;
+      const reason = error.code || error.name || 'CLI error';
+      probeFailures++;
+      reportError(`Tailscale status probe failed (${reason}), attempt ${probeFailures}/3`);
+      // A failed probe is not evidence that a private address changed. Keep the
+      // existing binding during brief CLI stalls; never fall back to another interface.
+      if (address && probeFailures >= 3) fail('Tailscale status unavailable after 3 probes; restarting private listener');
+      else if (!address) publishStatus({ state: 'waiting-network', connectionStatus: 'disconnected', pid: process.pid,
+        lastError: `Waiting for Tailscale (${reason}). No public or LAN listener is opened.` });
+      return;
+    } finally { checking = false; }
+    if (stopped) return;
     // Validate again at the binding boundary, including injected address providers.
     next = addressFromStatus({ BackendState: 'Running', TailscaleIPs: [next] });
     if (address) {
@@ -54,7 +89,7 @@ function startPrivateNetwork({
     }
     if (!next) {
       publishStatus({ state: 'waiting-network', connectionStatus: 'disconnected', pid: process.pid,
-        lastError: `Waiting for Tailscale${unavailable}. No public or LAN listener is opened.` });
+        lastError: 'Waiting for Tailscale. No public or LAN listener is opened.' });
       return;
     }
     starting = true;
@@ -78,7 +113,7 @@ function startPrivateNetwork({
     });
   }
   timer = schedule(check);
-  check();
-  return { check, stop() { stopped = true; cancel(timer); relay?.wss?.clients?.forEach(client => client.terminate()); relay?.wss?.close(); relay?.server.close(); } };
+  const ready = check();
+  return { check, ready, stop() { stopped = true; cancel(timer); relay?.wss?.clients?.forEach(client => client.terminate()); relay?.wss?.close(); relay?.server.close(); } };
 }
-module.exports = { addressFromStatus, readTailscaleAddress, startPrivateNetwork };
+module.exports = { addressFromStatus, readTailscaleAddress, readTailscaleAddressAsync, startPrivateNetwork };

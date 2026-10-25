@@ -4,7 +4,7 @@ import SwiftUI
 // An unpaired simulator fixture for drawer/scroll regressions with long CJK Markdown.
 // Every RPC is intercepted; this scene cannot send a task to a real agent.
 @MainActor
-func configureSidebarPerformancePreview(_ service: CodexService) {
+func configureSidebarPerformancePreview(_ service: CodexService, deferredHistory: Bool = false) {
     let threadID = "sidebar-demo"
     UserDefaults.standard.set(true, forKey: "codex.hasSeenOnboarding")
     UserDefaults.standard.set("1.1", forKey: "codex.whatsNew.lastPresentedVersion")
@@ -22,12 +22,14 @@ func configureSidebarPerformancePreview(_ service: CodexService) {
         return CodexThread(id: id, title: title, updatedAt: updated, cwd: "/demo/project-\(index % 8)")
     }
     let paragraph = "这是一段用于验证界面性能的虚构中文内容。侧边栏打开和关闭时，屏幕外的历史消息不应反复参与排版。消息仍需保留粗体、列表、代码和链接，滚动后可以继续阅读历史内容。"
-    let messages = (0..<60).map { (index: Int) in
+    let messageCount = deferredHistory ? 180 : 60
+    let paragraphCount = deferredHistory ? 12 : 3
+    let messages = (0..<messageCount).map { (index: Int) in
         CodexMessage(id: "sidebar-message-\(index)", threadId: threadID, role: .assistant,
                      text: """
                      ### 示例记录 \(index)
 
-                     **排版检查**：\(String(repeating: paragraph, count: 3))
+                     **排版检查**：\(String(repeating: paragraph, count: paragraphCount))
 
                      - 第一项：保留原有内容与操作。
                      - 第二项：展开侧边栏后可以继续阅读。
@@ -37,13 +39,15 @@ func configureSidebarPerformancePreview(_ service: CodexService) {
                      print(message)
                      ```
 
-                     \(index == 59 ? "SIDEBAR_TAIL_MARKER" : "历史记录 \(index)")
+                     \(index == messageCount - 1 ? "SIDEBAR_TAIL_MARKER" : "历史记录 \(index)")
                      """, turnId: "sidebar-turn-\(index)", orderIndex: index)
     }
-    service.messagesByThread[threadID] = messages
-    service.messageRevisionByThread[threadID] = 1
-    service.resumedThreadIDs.insert(threadID)
-    service.hydratedThreadIDs.insert(threadID)
+    service.messagesByThread[threadID] = deferredHistory ? [] : messages
+    service.messageRevisionByThread[threadID] = deferredHistory ? 0 : 1
+    if !deferredHistory {
+        service.resumedThreadIDs.insert(threadID)
+        service.hydratedThreadIDs.insert(threadID)
+    }
     service.activeThreadId = threadID
 
     let threadJSON: JSONValue = .object([
@@ -65,11 +69,16 @@ func configureSidebarPerformancePreview(_ service: CodexService) {
     service.requestTransportOverride = { method, params in
         let result: JSONValue
         switch method {
+        case "account/status/read":
+            result = .object(["bridgeVersion": .string(CodexService.minimumSupportedBridgePackageVersion),
+                              "codexTransportMode": .string("shared")])
         case "claude/sessions": result = .object(["data": .array([try json(claude)])])
         case "claude/snapshot":
             result = try json(ClaudeSnapshot(session: claude, messages: [ClaudeChatMessage(id: "r", seq: 1, role: "assistant", text: "购物车逻辑已检查，请确认运行相关测试。", source: "channel", createdAt: claude.updatedAt)], permissions: [permission], receipts: [], nextBefore: nil))
-        case "thread/read", "thread/resume": result = .object(["thread": threadJSON])
-        case "remote/sync": result = .object(["approvals": .array([])])
+        case "thread/read", "thread/resume":
+            if deferredHistory { try await Task.sleep(for: .seconds(2)) }
+            result = .object(["thread": threadJSON])
+        case "remote/sync": result = .object(["connected": .bool(true), "approvals": .array([])])
         case "remote/control":
             try await Task.sleep(for: .seconds(6))
             result = .object([
@@ -94,6 +103,22 @@ struct SidebarAuditPreview: View {
             .safeAreaInset(edge: .top) {
                 Button("模拟 Codex 通知") {
                     service.handleNotificationOpen(threadId: "sidebar-demo", turnId: nil)
+                }
+                .buttonStyle(.bordered)
+            }
+    }
+}
+
+struct SidebarRecoveryPreview: View {
+    @Environment(CodexService.self) private var service
+
+    var body: some View {
+        ContentView()
+            .safeAreaInset(edge: .top) {
+                Button(service.sharedDaemonConnected == false ? "恢复 Codex（模拟）" : "断开 Codex（模拟）") {
+                    service.handleNotification(method: "remote/status", params: .object([
+                        "connected": .bool(service.sharedDaemonConnected == false)
+                    ]))
                 }
                 .buttonStyle(.bordered)
             }

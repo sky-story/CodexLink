@@ -55,6 +55,8 @@ extension CodexService {
 
     enum ThreadDisplayPhase: Equatable {
         case loading
+        case waitingForConnection
+        case failed(String)
         case empty
         case ready
     }
@@ -81,9 +83,10 @@ extension CodexService {
         hasVisibleMessages: Bool,
         isThreadRunning: Bool
     ) -> ThreadDisplayPhase {
-        if hasVisibleMessages || isThreadRunning {
+        if hasVisibleMessages {
             return .ready
         }
+        if isThreadRunning { return isCodexReady ? .ready : .waitingForConnection }
 
         if shouldSkipInitialDisplayHydration(
             threadId: threadId,
@@ -97,6 +100,8 @@ extension CodexService {
             return .empty
         }
 
+        if !isCodexReady { return .waitingForConnection }
+        if let error = threadHistoryErrors[threadId] { return .failed(error) }
         if loadingThreadIDs.contains(threadId) {
             return .loading
         }
@@ -628,9 +633,11 @@ extension CodexService {
         var didRefreshRunningState = false
         var shouldRequestImmediateSync = true
 
-        guard isConnected else {
+        guard isCodexReady else {
             return true
         }
+        let displayGeneration = connectionGeneration
+        threadHistoryErrors.removeValue(forKey: threadId)
 
         // Freshly created empty chats do not need an immediate resume/read pass.
         // Skipping that first hydration avoids extra RPC contention when another
@@ -663,6 +670,9 @@ extension CodexService {
         do {
             try await ensureThreadResumed(threadId: threadId)
         } catch {
+            if !Task.isCancelled, displayGeneration == connectionGeneration, isCodexReady {
+                threadHistoryErrors[threadId] = error.localizedDescription
+            }
             if shouldTreatAsThreadNotFound(error) {
                 handleMissingThread(threadId)
             }
@@ -846,6 +856,7 @@ extension CodexService {
         let refreshGeneration = currentPerThreadRefreshGeneration(for: threadId)
         let task = Task<ThreadHistoryLoadOutcome, Error> { @MainActor in
             loadingThreadIDs.insert(threadId)
+            threadHistoryErrors.removeValue(forKey: threadId)
             defer {
                 // Only clear bookkeeping for the latest refresh generation.
                 if isPerThreadRefreshCurrent(for: threadId, generation: refreshGeneration) {
@@ -964,7 +975,14 @@ extension CodexService {
         }
 
         threadHistoryLoadTaskByThreadID[threadId] = task
-        return try await task.value
+        do { return try await task.value }
+        catch {
+            if !Task.isCancelled, !(error is CancellationError), isCodexReady,
+               isPerThreadRefreshCurrent(for: threadId, generation: refreshGeneration) {
+                threadHistoryErrors[threadId] = error.localizedDescription
+            }
+            throw error
+        }
     }
 
     // Extracts context window usage from thread/read response if the runtime includes it.

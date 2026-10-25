@@ -41,7 +41,9 @@ async function readThreadWithLiveFallback(rpc, params) {
   }
 }
 
-function createSharedRuntime({ endpoint = defaultEndpoint(), env = process.env, store: providedStore, discoveryInterval = 3000 } = {}) {
+function createSharedRuntime({ endpoint = defaultEndpoint(), env = process.env, store: providedStore, discoveryInterval = 3000,
+  reportConnection = message => console.warn(`[codex-remote] ${new Date().toISOString()} pid=${process.pid} ${message}`),
+} = {}) {
   const listeners = {}; const pending = new Map(); const attached = new Set();
   const store = providedStore || new ControlStore(path.join(env.CODEX_REMOTE_STATE_DIR || env.CODEX_REMOTE_DEVICE_STATE_DIR || path.join(os.homedir(), '.codex-remote'), 'control.sqlite'));
   let socket, ready = false, stopped = false, reconnectTimer, discoveryTimer, attempts = 0, discovering = false;
@@ -52,7 +54,7 @@ function createSharedRuntime({ endpoint = defaultEndpoint(), env = process.env, 
     }
   };
   const rpc = (method, params) => new Promise((resolve, reject) => {
-    if (!ready || socket?.readyState !== WebSocket.OPEN) return reject(new Error('Codex daemon disconnected; request was not sent'));
+    if ((!ready && method !== 'initialize') || socket?.readyState !== WebSocket.OPEN) return reject(new Error('Codex daemon disconnected; request was not sent'));
     if (method === null) { socket.send(JSON.stringify(params), error => error ? reject(error) : resolve({})); return; }
     const id = `remote-internal-${randomUUID()}`;
     const timer = setTimeout(() => { pending.delete(id); reject(new Error('Codex outcome unknown after timeout; not resent')); }, 30000);
@@ -93,15 +95,19 @@ function createSharedRuntime({ endpoint = defaultEndpoint(), env = process.env, 
     socket = new WebSocket(socketURL(endpoint), { maxPayload: 32 * 1024 * 1024,
       ...(env.CODEX_REMOTE_UPSTREAM_TOKEN ? { headers: { Authorization: `Bearer ${env.CODEX_REMOTE_UPSTREAM_TOKEN}` } } : {}) });
     socket.on('open', async () => {
-      ready = true;
       try {
         await rpc('initialize', { clientInfo: { name: 'codex_remote_ios_bridge', version: '0.1.0' }, capabilities: { experimentalApi: true } });
         socket.send(JSON.stringify({ method: 'initialized' }));
+        ready = true;
+        reportConnection('Codex daemon connection ready');
         attempts = 0; listeners.started?.({ mode: 'shared', launchDescription: endpoint });
         emit({ method: 'remote/status', params: { connected: true, sharedSession: true } });
         await discover();
         if (ready) discoveryTimer = setInterval(discover, discoveryInterval);
-      } catch { socket.close(); }
+      } catch (error) {
+        if (!stopped) reportConnection(`Codex daemon handshake failed (${error.code || error.name || 'error'})`);
+        socket.close();
+      }
     });
     socket.on('message', raw => {
       let message; try { message = JSON.parse(raw); } catch { return; }
@@ -115,12 +121,14 @@ function createSharedRuntime({ endpoint = defaultEndpoint(), env = process.env, 
       if (message.method === 'thread/closed') attached.delete(message.params.threadId);
       if (message.method) emit(message);
     });
-    socket.on('error', () => {}); // Close drives recovery; never starts a replacement runtime.
-    socket.on('close', () => {
+    // Close drives recovery; logs contain transport metadata, never message content.
+    socket.on('error', error => { if (!stopped) reportConnection(`Codex daemon socket error (${error.code || error.name || 'error'})`); });
+    socket.on('close', code => {
       ready = false; attached.clear(); controller.approvals.clear(); clearInterval(discoveryTimer);
       for (const waiter of pending.values()) { clearTimeout(waiter.timer); waiter.reject(new Error('Codex disconnected; outcome unknown')); }
       pending.clear();
       if (!stopped) {
+        reportConnection(`Codex daemon disconnected (close=${code}); reconnecting`);
         emit({ method: 'remote/status', params: { connected: false, detail: 'Waiting for the existing Codex daemon' } });
         reconnectTimer = setTimeout(connect, Math.min(1000 * 2 ** attempts++, 30000));
       } else if (!providedStore) {
@@ -144,7 +152,7 @@ function createSharedRuntime({ endpoint = defaultEndpoint(), env = process.env, 
       }
       return { data: store.receipts(params.threadId) };
     }
-    if (method === 'remote/sync') return { ...(params.snapshotOnly ? {} : store.replay(Number.isSafeInteger(params.after) ? params.after : 0)), approvals: [...controller.approvals.values()] };
+    if (method === 'remote/sync') return { ...(params.snapshotOnly ? {} : store.replay(Number.isSafeInteger(params.after) ? params.after : 0)), connected: ready, approvals: [...controller.approvals.values()] };
     if (method === 'remote/queue') return rpc('thread/queue/list', { threadId: params.threadId });
     if (method === 'thread/read') return readThreadWithLiveFallback(rpc, params);
     if (method === 'remote/turnState') {

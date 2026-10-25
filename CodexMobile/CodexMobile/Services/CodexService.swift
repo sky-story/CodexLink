@@ -340,6 +340,13 @@ final class CodexService {
     @ObservationIgnored var claudeSessionListTaskScope: String?
     @ObservationIgnored var claudeSessionListTaskToken: UUID?
     var sharedControlStatus: [String: String] = [:]
+    var sharedControlRecoveryError: [String: String] = [:]
+    // The phone-to-Bridge transport can be healthy while its Codex socket is down.
+    var sharedDaemonConnected: Bool?
+    var sharedDaemonStateRevision: UInt64 = 0
+    @ObservationIgnored var sharedDaemonRecoveryTask: Task<Void, Never>?
+    @ObservationIgnored var sharedDaemonRecoveryToken: UUID?
+    var threadHistoryErrors: [String: String] = [:]
     var sharedQueueText: [String: [String]] = [:]
     var isInitialized = false
     // Views must observe connection replacement even if the relay and visible

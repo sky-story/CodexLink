@@ -97,6 +97,8 @@ extension CodexService {
         }
 
         isAppInForeground = isForeground
+        if isForeground { startSharedDaemonRecoveryIfNeeded() }
+        else { stopSharedDaemonRecovery() }
         if isForeground {
             if isConnected && isInitialized {
                 startSyncLoop()
@@ -175,7 +177,7 @@ extension CodexService {
     }
 
     func syncThreadHistory(threadId: String, force: Bool = false) async {
-        guard isConnected, isInitialized else {
+        guard isCodexReady else {
             return
         }
 
@@ -810,7 +812,7 @@ extension CodexService {
     }
 
     var canRunRealtimeSyncLoop: Bool {
-        syncRealtimeEnabled && isConnected && isInitialized
+        syncRealtimeEnabled && isCodexReady
     }
 
     // Prioritizes only desktop-mirrored runs that still lack authoritative assistant deltas.

@@ -173,6 +173,10 @@ extension CodexService {
 
     // Handles stream notifications to keep UI state in sync.
     func handleNotification(method: String, params: JSONValue?) {
+        if method == "remote/status", let connected = params?.objectValue?["connected"]?.boolValue {
+            applySharedDaemonStatus(connected)
+            return
+        }
         if method == "remote/command/updated" { applySharedReceipt(params); return }
         if method == "thread/queue/changed", let threadID = params?.objectValue?["threadId"]?.stringValue {
             Task { await refreshSharedQueue(threadID: threadID) }; return

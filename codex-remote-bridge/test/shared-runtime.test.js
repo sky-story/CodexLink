@@ -5,6 +5,45 @@ const { once } = require('node:events');
 const { createSharedRuntime } = require('../src/shared-runtime');
 const { ControlStore } = require('../src/control-store');
 
+test('readiness snapshots stay false until the daemon handshake completes and recover after disconnect', async () => {
+  const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' }); await once(wss, 'listening');
+  let peer, initializeID;
+  const calls = [], received = [];
+  wss.on('connection', ws => {
+    peer = ws;
+    ws.on('message', raw => {
+      const msg = JSON.parse(raw); calls.push(msg);
+      if (msg.method === 'initialize') { initializeID = msg.id; return; }
+      if (msg.id != null) ws.send(JSON.stringify({ id: msg.id, result: { data: [], nextCursor: null } }));
+    });
+  });
+  const store = new ControlStore(':memory:');
+  const runtime = createSharedRuntime({ endpoint: `ws://127.0.0.1:${wss.address().port}`, store });
+  runtime.onMessage(raw => received.push(JSON.parse(raw)));
+  const until = async fn => { for (let i = 0; i < 300; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); } throw new Error('Timeout'); };
+  async function request(id, method) {
+    runtime.send(JSON.stringify({ id, method, params: { snapshotOnly: true } }));
+    await until(() => received.some(e => e.id === id));
+    return received.find(e => e.id === id);
+  }
+  try {
+    await until(() => initializeID);
+    assert.equal((await request('starting', 'remote/sync')).result.connected, false);
+    assert.match((await request('early-read', 'thread/read')).error.message, /request was not sent/);
+    assert(!calls.some(c => c.method === 'thread/read'));
+    peer.send(JSON.stringify({ id: initializeID, result: {} }));
+    await until(() => received.some(e => e.method === 'remote/status' && e.params.connected));
+    assert.equal((await request('ready', 'remote/sync')).result.connected, true);
+    const oldPeer = peer; initializeID = null; oldPeer.terminate();
+    await until(() => received.some(e => e.method === 'remote/status' && e.params.connected === false));
+    assert.equal((await request('offline', 'remote/sync')).result.connected, false);
+    await until(() => initializeID && peer !== oldPeer);
+    peer.send(JSON.stringify({ id: initializeID, result: {} }));
+    await until(() => received.filter(e => e.method === 'remote/status' && e.params.connected).length === 2);
+    assert.equal((await request('recovered', 'remote/sync')).result.connected, true);
+  } finally { runtime.shutdown(); peer?.terminate(); await new Promise(r => wss.close(r)); store.close(); }
+});
+
 test('shared runtime initializes, discovers live threads without overrides, routes queue and never starts another runtime', async () => {
   const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' }); await once(wss, 'listening');
   const calls = []; let peer;

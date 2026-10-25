@@ -250,7 +250,7 @@ struct TurnView: View {
             preferredItemEncoding: .automatic
         )
         .turnViewLifecycle(
-            taskID: thread.id,
+            taskID: "\(thread.id)-\(codex.connectionGeneration)-\(codex.isCodexReady)",
             activeTurnID: activeTurnID,
             isThreadRunning: isThreadRunning,
             isConnected: codex.isConnected,
@@ -1699,11 +1699,6 @@ struct TurnView: View {
     }
 
     private func handleConnectionRecoveryAction() {
-        if shouldOfferWakeSavedMacDisplayAction {
-            wakeMacDisplayAction?()
-            return
-        }
-
         reconnectAction?()
     }
 
@@ -1756,6 +1751,18 @@ struct TurnView: View {
         switch phase {
         case .loading:
             return AnyView(loadingState)
+        case .waitingForConnection:
+            return AnyView(chatPlaceholderState(
+                title: "等待连接恢复",
+                subtitle: codex.isConnected ? "Mac 已连接，正在恢复 Codex 会话。恢复后会自动加载消息。" : "连接 Mac 后会自动加载消息。"
+            ))
+        case .failed(let message):
+            return AnyView(VStack {
+                chatPlaceholderState(title: "暂时无法加载消息", subtitle: message)
+                Button("重试") { Task { await prepareThreadIfReady(gitWorkingDirectory: thread.gitWorkingDirectory) } }
+                    .buttonStyle(.bordered)
+                    .padding(.bottom, 20)
+            })
         case .empty, .ready:
             return AnyView(emptyState)
         }

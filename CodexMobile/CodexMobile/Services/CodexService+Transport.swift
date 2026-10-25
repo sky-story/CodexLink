@@ -58,9 +58,20 @@ extension CodexService {
     // Sends an RPC request and waits for the matching response by request id.
     func sendRequest(method: String, params: JSONValue?, timeout: Duration? = nil, timeoutMessage: String = "读取 Mac 数据超时，请重试。") async throws -> RPCMessage {
         let generation = connectionGeneration
-        let response = try await sendRequestOnCurrentConnection(method: method, params: params, generation: generation, timeout: timeout, timeoutMessage: timeoutMessage)
-        guard generation == connectionGeneration else { throw CodexServiceError.disconnected }
-        return response
+        let runtimeRevision = sharedDaemonStateRevision
+        do {
+            let response = try await sendRequestOnCurrentConnection(method: method, params: params, generation: generation, timeout: timeout, timeoutMessage: timeoutMessage)
+            guard generation == connectionGeneration else { throw CodexServiceError.disconnected }
+            if supportsSharedSessionControl, runtimeRevision == sharedDaemonStateRevision,
+               Self.isSharedDaemonRead(method) { applySharedDaemonStatus(true) }
+            return response
+        } catch {
+            if generation == connectionGeneration, runtimeRevision == sharedDaemonStateRevision,
+               supportsSharedSessionControl, Self.isSharedDaemonDisconnectError(error) {
+                applySharedDaemonStatus(false)
+            }
+            throw error
+        }
     }
 
     private func sendRequestOnCurrentConnection(method: String, params: JSONValue?, generation: UInt64, timeout: Duration?, timeoutMessage: String) async throws -> RPCMessage {

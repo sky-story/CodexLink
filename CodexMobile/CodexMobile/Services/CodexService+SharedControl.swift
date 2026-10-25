@@ -3,7 +3,7 @@ import Foundation
 
 extension CodexService {
     func sharedControl(threadID: String, action: String, text: String = "", requestID: JSONValue? = nil, decision: String? = nil, answers: JSONValue? = nil, model: String? = nil, effort: String? = nil) async throws {
-        guard isConnected, isInitialized, supportsSharedSessionControl else {
+        guard isSharedSessionReady else {
             throw CodexServiceError.invalidInput("会话状态正在恢复，请稍后再试。")
         }
         let id = UUID().uuidString
@@ -75,7 +75,7 @@ extension CodexService {
     }
 
     func refreshSharedQueue(threadID: String) async {
-        guard supportsSharedSessionControl else { return }
+        guard isSharedSessionReady else { return }
         if let result = try? await sendRequest(method: "remote/queue", params: .object(["threadId": .string(threadID)]), timeout: .seconds(12)) {
             sharedQueueText[threadID] = (result.result?.objectValue?["data"]?.arrayValue ?? []).map { row in
                 (row.objectValue?["input"]?.arrayValue ?? []).compactMap { $0.objectValue?["text"]?.stringValue }.joined(separator: " ")
@@ -84,9 +84,12 @@ extension CodexService {
     }
 
     func recoverSharedControl(threadID: String) async {
-        guard supportsSharedSessionControl, isConnected else { return }
+        guard isSharedSessionReady else { return }
+        let generation = connectionGeneration
         await refreshSharedSettings(threadID: threadID)
         await refreshSharedQueue(threadID: threadID)
+        guard !Task.isCancelled, isSharedSessionReady, generation == connectionGeneration else { return }
+        let revision = sharedDaemonStateRevision
         do {
             let response = try await sendRequest(method: "remote/receipts", params: .object(["threadId": .string(threadID)]), timeout: .seconds(12))
             if let receipts = response.result?.objectValue?["data"]?.arrayValue {
@@ -101,12 +104,22 @@ extension CodexService {
             }
             if unresolved { sharedControlStatus[threadID] = "Unconfirmed delivery remains. Check history before sending again." }
             try await restoreSharedApprovals()
-        } catch { sharedControlStatus[threadID] = error.localizedDescription }
+            guard generation == connectionGeneration, revision == sharedDaemonStateRevision else { return }
+            sharedControlRecoveryError.removeValue(forKey: threadID)
+        } catch {
+            guard !Task.isCancelled, isSharedSessionReady, generation == connectionGeneration,
+                  revision == sharedDaemonStateRevision else { return }
+            sharedControlRecoveryError[threadID] = error.localizedDescription
+        }
     }
 
     // Read-only recovery before controls become usable; commands are never replayed.
     func restoreSharedApprovals() async throws {
+        let revision = sharedDaemonStateRevision
         let sync = try await sendRequest(method: "remote/sync", params: .object(["after": .integer(0), "snapshotOnly": .bool(true)]), timeout: .seconds(12))
+        if revision == sharedDaemonStateRevision, let connected = sync.result?.objectValue?["connected"]?.boolValue {
+            applySharedDaemonStatus(connected)
+        }
         guard let requests = sync.result?.objectValue?["approvals"]?.arrayValue else {
             throw CodexServiceError.invalidResponse("Mac did not return the pending request snapshot")
         }
@@ -164,21 +177,24 @@ extension CodexService {
     }
 
     func refreshSharedSettings(threadID: String) async {
-        guard supportsSharedSessionControl, isConnected else { return }
+        guard isSharedSessionReady else { return }
         let revision = sharedSettingsRevision[threadID, default: 0]
+        let generation = connectionGeneration
         do {
             // Metadata read works even for empty threads and paginated history failures.
             let response = try await sendRequest(method: "thread/read", params: .object([
                 "threadId": .string(threadID), "includeTurns": .bool(false)
             ]), timeout: .seconds(12))
-            guard revision == sharedSettingsRevision[threadID, default: 0] else { return }
+            guard !Task.isCancelled, generation == connectionGeneration, isSharedSessionReady,
+                  revision == sharedSettingsRevision[threadID, default: 0] else { return }
             guard let thread = response.result?.objectValue?["thread"]?.objectValue,
                   thread["id"]?.stringValue == threadID else {
                 throw CodexServiceError.invalidResponse("Mac returned settings for a different session")
             }
             applySharedSettings(threadID: threadID, object: thread)
         } catch {
-            if revision == sharedSettingsRevision[threadID, default: 0] {
+            if !Task.isCancelled, !(error is CancellationError), generation == connectionGeneration,
+               isSharedSessionReady, revision == sharedSettingsRevision[threadID, default: 0] {
                 sharedSettingsError[threadID] = error.localizedDescription
             }
         }

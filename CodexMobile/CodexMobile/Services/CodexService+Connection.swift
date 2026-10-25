@@ -384,6 +384,7 @@ extension CodexService {
         }
         guard generation == connectionGeneration else { throw CodexServiceError.disconnected }
         isInitialized = true
+        startSharedDaemonRecoveryIfNeeded()
     }
 
     // Converts a bridge-declared "your iPhone app is too old" initialize failure into
@@ -627,6 +628,11 @@ extension CodexService {
     // Drops sync work tied to the old transport so reconnect starts from a clean baseline.
     private func clearConnectionSyncState() {
         connectionGeneration &+= 1
+        stopSharedDaemonRecovery()
+        sharedDaemonConnected = nil
+        sharedDaemonStateRevision &+= 1
+        sharedControlRecoveryError.removeAll()
+        threadHistoryErrors.removeAll()
         applyBridgeCapabilities(nil)
         threadListRefreshTask?.cancel()
         threadListRefreshTask = nil
@@ -954,6 +960,8 @@ extension CodexService {
 
     // Surfaces only meaningful connection failures to the UI and keeps reconnect noise silent.
     func presentConnectionErrorIfNeeded(_ error: Error, fallbackMessage: String? = nil) {
+        // The shared composer/empty state already presents this recoverable upstream outage.
+        if supportsSharedSessionControl, Self.isSharedDaemonDisconnectError(error) { return }
         guard !shouldSuppressUserFacingConnectionError(error) else {
             return
         }

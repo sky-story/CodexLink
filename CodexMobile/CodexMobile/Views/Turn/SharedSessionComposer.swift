@@ -28,7 +28,7 @@ struct SharedSessionComposer: View {
                 .lineLimit(1...6).textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("shared-message")
             HStack {
-                Text(codex.sharedControlStatus[threadID] ?? "Live · Mac 共享会话")
+                Text(codex.sharedSessionStatusText(threadID: threadID))
                     .font(.caption).foregroundStyle(.secondary)
                     .accessibilityIdentifier("shared-thread-\(threadID)")
                 Spacer()
@@ -42,7 +42,7 @@ struct SharedSessionComposer: View {
         }
         .padding(12).background(.regularMaterial)
 
-        .task(id: "\(threadID)-\(canControl)") {
+        .task(id: "\(threadID)-\(canControl)-\(codex.connectionGeneration)-\(codex.sharedDaemonStateRevision)") {
             guard canControl else { return }
             await ConnectionTrace.shared.measure("recover_shared_control") { await codex.recoverSharedControl(threadID: threadID) }
             if codex.isConnected && codex.availableModels.isEmpty { try? await codex.listModels() }
@@ -51,7 +51,7 @@ struct SharedSessionComposer: View {
             if phase == .active { Task { await codex.refreshSharedSettings(threadID: threadID) } }
         }
     }
-    private var canControl: Bool { codex.isConnected && codex.isInitialized && codex.supportsSharedSessionControl }
+    private var canControl: Bool { codex.isSharedSessionReady }
     private var settings: SharedSessionSettings? { codex.sharedSessionSettings[threadID] }
     private var selectedModel: CodexModelOption? {
         codex.availableModels.first { $0.model == settings?.model }
@@ -106,12 +106,12 @@ struct SharedSessionComposer: View {
                 .disabled(settingsDisabled || selectedModel?.supportedReasoningEfforts.isEmpty != false)
                 if updatingSettings { ProgressView().controlSize(.small) }
             }
-            Text(!codex.isConnected ? "离线 · 显示上次读取的配置" : "修改用于后续任务及待执行队列；不会改变当前执行中的任务。")
+            Text(!canControl ? "连接恢复中 · 显示上次读取的配置" : "修改用于后续任务及待执行队列；不会改变当前执行中的任务。")
                 .font(.caption2).foregroundStyle(.secondary)
             if !codex.supportsSharedSessionSettings && codex.isConnected && codex.isInitialized {
                 Text("更新 Mac Bridge 后可修改配置").font(.caption2).foregroundStyle(.secondary)
             }
-            if let message = codex.sharedSettingsError[threadID] ?? codex.modelsErrorMessage {
+            if canControl, let message = codex.sharedSettingsError[threadID] ?? codex.modelsErrorMessage {
                 HStack {
                     Text(message).font(.caption2).foregroundStyle(.red).lineLimit(2)
                     Button("重试") { Task {

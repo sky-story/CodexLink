@@ -8,7 +8,7 @@ import XCTest
 @testable import CodexMobile
 
 final class TurnConnectionRecoverySnapshotBuilderTests: XCTestCase {
-    func testWakeActionWinsOverRetryProgressWhenManualWakeFallbackIsAvailable() {
+    func testReconnectActionRemainsAvailableWhenManualWakeFallbackIsAvailable() {
         let snapshot = TurnConnectionRecoverySnapshotBuilder.makeSnapshot(
             hasReconnectCandidate: true,
             isConnected: false,
@@ -22,7 +22,7 @@ final class TurnConnectionRecoverySnapshotBuilderTests: XCTestCase {
         )
 
         XCTAssertEqual(snapshot?.status, .interrupted)
-        XCTAssertEqual(snapshot?.trailingStyle, .action("Wake Screen"))
+        XCTAssertEqual(snapshot?.trailingStyle, .action("Reconnect"))
         XCTAssertEqual(snapshot?.summary, "Trying to reach your saved Mac. CodexLink will keep retrying.")
     }
 
@@ -41,7 +41,7 @@ final class TurnConnectionRecoverySnapshotBuilderTests: XCTestCase {
 
         XCTAssertEqual(snapshot?.status, .reconnecting)
         XCTAssertEqual(snapshot?.trailingStyle, .progress)
-        XCTAssertEqual(snapshot?.summary, "Trying to reconnect to your Mac.")
+        XCTAssertEqual(snapshot?.summary, "Trying to reconnect to your computer.")
     }
 
     func testWakeInFlightShowsProgressInsteadOfReconnectAction() {
