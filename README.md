@@ -1,18 +1,57 @@
-<img align="right" src="CodexMobile/CodexMobile/Assets.xcassets/AppLogo.imageset/CodexRemote-iOS-Default-1024x1024.png" width="88" alt="CodexLink app icon" />
+<div align="center">
+  <img src="CodexMobile/CodexMobile/Assets.xcassets/AppLogo.imageset/CodexRemote-iOS-Default-1024x1024.png" width="80" alt="CodexLink" />
+  <h1>CodexLink</h1>
+  <p><strong>Your Mac keeps working. Take the conversation with you.</strong></p>
+  <p>A native iPhone companion for Codex CLI and Claude Code.</p>
+  <p><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
+  <p>
+    <a href="docs/release-readiness.md"><img src="https://img.shields.io/badge/status-alpha-3F6545?style=flat-square&amp;labelColor=202020" alt="Alpha / developer preview" /></a>
+    <img src="https://img.shields.io/badge/iOS-18.6%2B-303030?style=flat-square&amp;labelColor=202020" alt="iOS 18.6 or later" />
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-ISC-303030?style=flat-square&amp;labelColor=202020" alt="ISC license" /></a>
+  </p>
+  <p>
+    <a href="#features">Features</a> ·
+    <a href="#getting-started">Get started</a> ·
+    <a href="#project-docs">Documentation</a> ·
+    <a href="CHANGELOG.md">Changelog</a>
+  </p>
+</div>
 
-# CodexLink
+<p align="center">
+  <a href="docs/images/readme-showcase.png"><img src="docs/images/readme-showcase.png" width="1000" alt="CodexLink: keep your session close. Offline Codex and Claude UI previews with fictional data." /></a>
+</p>
 
-**English** | [简体中文](README.zh-CN.md)
+Follow the **same running Codex session on your Mac**, add direction, queue the next instruction, or review an approval. Enable the optional Claude Channels integration to read replies and continue Claude conversations in the same app. Your Mac runs the models and tools.
 
-View and control the **same running Codex CLI session on your Mac** from a native SwiftUI iPhone app. Your Mac runs the model and tools; your phone provides live output, Steer, a persistent Queue, Stop, and remote approvals.
+<a id="features"></a>
 
-The **optional Claude Code extension** adds text history, messages to the same Mac Claude session, and Bark lock-screen notifications in the same app. It uses your existing official Claude account on Mac. Physical phone messaging and automatic response notifications are verified; phone tool approvals still need acceptance.
+## Stay close to the work
 
-**Status: Alpha / developer preview.** Intended for users comfortable building from source and troubleshooting. This is a fork of [RealDyllon/codex-remote](https://github.com/RealDyllon/codex-remote/tree/9a737fb), distributed under the ISC license. It is not an official OpenAI or Anthropic client.
+<table>
+  <tr>
+    <td width="50%" valign="top"><strong>One session, both devices</strong><br />Follow live Codex output on your phone, then continue in the original Mac terminal.</td>
+    <td width="50%" valign="top"><strong>Codex and Claude, together</strong><br />Find sessions by project. Switch between tools while keeping drafts and reading position.</td>
+  </tr>
+  <tr>
+    <td valign="top"><strong>Steer now. Queue what comes next.</strong><br />Guide the current Codex task, leave persistent instructions for later, or stop the current Turn.</td>
+    <td valign="top"><strong>Made for reading on iPhone</strong><br />Markdown, syntax highlighting, and clear emphasis make long replies easier to follow.</td>
+  </tr>
+  <tr>
+    <td valign="top"><strong>Review requests from your phone</strong><br />Codex one-time approval is verified on iPhone. Claude phone approvals still need acceptance.</td>
+    <td valign="top"><strong>Know when a reply is ready</strong><br />Optional Bark alerts with source icons, session labels, and Claude task titles.</td>
+  </tr>
+</table>
+
+**Recently improved:** Claude loading recovery, independent navigation, draft and receipt protection, and CLI-inspired text colors. See the [changelog](CHANGELOG.md).
+
+> **Alpha / developer preview:** build from source with Xcode and a private network connection. This is a community project, not an official OpenAI or Anthropic client.
 
 ## UI preview
 
-These screenshots use the actual SwiftUI views, rendered in a **separate simulator with fictional to-do app data**. The Chinese label above each image means “Demo data · Offline preview.” No real conversations, pairing data, or push keys appear. These are UI examples, not end-to-end test evidence.
+The cover and app screenshots use actual SwiftUI views with fictional offline data. They illustrate the interface, including Claude approval UI that still needs physical-phone acceptance. Notification images are illustrations. See [image sources and reproduction](docs/images/README.md) (Chinese).
+
+<details>
+<summary><strong>Codex: live session → approval → completed response</strong></summary>
 
 <p align="center">
   <img src="docs/images/session-queue.png" width="280" alt="Running demo session with Queue, Steer, Mac queue status and receipts" />
@@ -22,53 +61,41 @@ These screenshots use the actual SwiftUI views, rendered in a **separate simulat
 
 Left to right: **running session and queue → approval request → completed response**. Steer updates the current task; Queue schedules input after it. Approvals require an explicit user decision. See [screenshot generation](docs/images/README.md) (Chinese).
 
-Also explore: **[Claude sessions and approvals](#claude-preview)** · **[Codex + Claude notification examples](#notification-preview)**.
+</details>
 
-## What works today
+<a id="claude-preview"></a>
+<details>
+<summary><strong>Claude: choose a session, read replies, review requests</strong></summary>
 
-| Capability | Validation scope |
-| --- | --- |
-| Live Mac CLI output | Verified on a physical iPhone, including cellular access through Tailscale |
-| Steer during execution | Verified on the original Turn, without starting another task |
-| Persistent Queue | Idle and busy Queue verified on iPhone; the Mac daemon owns the queue |
-| Codex session model and reasoning effort | Isolated live-daemon check passed; user confirmed the phone model menu opens, applying a phone change to a task still needs acceptance |
-| Remote approvals | One-time approval verified; denial, races, and reconnect with pending approval need further validation |
-| Stop | Original Turn interruption verified; **already-backgrounded tool processes may keep running** |
-| Continue on Mac | The original Mac TUI remains usable after phone controls |
-| Reconnect | One Wi-Fi-to-cellular handoff and one Bridge crash recovery verified |
-| Bark lock-screen notifications | Physical test delivery verified; automatic completion accepted by provider; approval lock-screen delivery pending |
-| Claude Code notifications | User confirmed automatic response notification on the locked iPhone; simultaneous Codex/Claude completion and approval delivery pending |
-| Claude sessions and tool approvals | Preview via official Channels; physical iPhone message/reply verified in the same Mac session; approval relay verified on Mac, physical phone approval pending |
-| Codex + Claude session overview | Project grouping and attention/unread states; isolated simulator checks passed, complete physical-device interaction validation pending |
-| Open this session on Mac (iTerm) | Implemented, experimental; full physical-device flow and macOS Automation permissions still need validation |
+<p align="center">
+  <img src="docs/images/claude-list.png" width="280" alt="Offline demo of the Claude session list with a connected fictional to-do app project" />
+  <img src="docs/images/claude-approval.png" width="280" alt="Offline demo of messages in the same Claude session and a one-time tool approval with deny and allow controls" />
+</p>
 
-See the [validation summary](docs/validation.md) and [release readiness](docs/release-readiness.md). These are scoped results, not a claim of production reliability.
+**Choose a session → read replies and review tool requests.** These are real SwiftUI views rendered with fictional offline data. Phone messaging is verified; the approval screen illustrates the implemented UI, while physical phone approval still needs acceptance.
 
-Project maintenance: [changelog](CHANGELOG.md) · [developer handoff](docs/HANDOFF.md) (Chinese).
+</details>
 
-## How it works
+<a id="notification-preview"></a>
+<details>
+<summary><strong>Notifications: Codex and Claude on your lock screen</strong></summary>
 
-```text
-Native Mac Codex TUI ──┐
-                      ├── Same Codex daemon / same Unix socket
-Mac Bridge ───────────┘
-    │
-    ├── Local Channel / Hooks ⇄ Claude Code (optional)
-    └── Private Relay ⇄ Tailscale ⇄ iPhone SwiftUI app
-                      (end-to-end encrypted after pairing)
+<p align="center">
+  <img src="docs/images/notifications-preview-en.png" width="800" alt="Illustration of Codex and Claude notifications with distinct app icons, fictional session labels, and the small Bark source badge" />
+</p>
 
-Codex events / Claude Hooks ── Optional event / session label → Bark → iPhone lock screen
-```
+**Notification illustration with fictional session labels.** Codex uses the CodexLink icon; Claude uses its official logo. The titles above mean “Codex · Task completed” and “Claude · Response ready.” iOS retains the small Bark badge to identify the receiving app. Source icons and session labels are optional; setup is below.
 
-A **Turn** is one task execution, ending in completion, failure, or interruption. Queue normally creates a later Turn; Steer adds input to the current Turn.
+</details>
 
-The Codex composer shows the session's model and reasoning effort, with choices supplied by your Mac's model catalog. Changes apply to subsequent tasks and waiting Queue entries; they do not change the running Turn. Settings are confirmed by the same daemon, with existing approval and sandbox policies preserved. Reconnecting refreshes the configuration; uncertain changes are not automatically resent. Update both the iPhone app and the Bridge to use the selectors.
-
-Codex features require the CLI and Bridge to connect to the **same shared daemon**. Loading history or starting a separate App Server does not share a running task. Sessions started with `--no-daemon` are unsupported; some CLI `-c` overrides may also select an embedded runtime. The optional Claude integration uses the official Channels preview protocol and must be enabled when launching Claude.
-
-The phone and Mac can use different Wi-Fi or cellular networks; a Tailscale exit node is not required. Model requests use the Mac's account and network. The phone does not need the Claude app or a separate model-account login.
+<a id="getting-started"></a>
 
 ## Requirements
+
+You need a Mac with Xcode, an iPhone, and Tailscale on both devices. Use your existing model account on Mac; a free Apple Personal Team can sign the phone app.
+
+<details>
+<summary><strong>Supported versions and full checklist</strong></summary>
 
 | Component | Requirement |
 | --- | --- |
@@ -81,6 +108,8 @@ The phone and Mac can use different Wi-Fi or cellular networks; a Tailscale exit
 | Apple account | A free Personal Team can sign a local build; renewal is typically needed after about 7 days |
 | Network | Tailscale installed on both devices, in the same tailnet with access between them |
 | Optional | Bark for lock-screen notifications; iTerm for “Open this session on Mac” |
+
+</details>
 
 This fork has no App Store or TestFlight build. The upstream app and npm package are not this fork. Build both the app and Bridge from this repository. Codex uses your own account and usage allowance.
 
@@ -157,12 +186,8 @@ The service runs Bridge and Relay together, listening on the Mac's Tailscale add
 
 ### 5. Optional: Bark lock-screen notifications
 
-<a id="notification-preview"></a>
-<p align="center">
-  <img src="docs/images/notifications-preview-en.png" width="800" alt="Illustration of Codex and Claude notifications with distinct app icons, fictional session labels, and the small Bark source badge" />
-</p>
-
-**Notification illustration with fictional session labels.** Codex uses the CodexLink icon; Claude uses its official logo. The titles above mean “Codex · Task completed” and “Claude · Response ready.” iOS retains the small Bark badge to identify the receiving app. Source icons and session labels are optional; setup is below.
+<details>
+<summary><strong>Configure Bark, session labels, and notification icons</strong></summary>
 
 1. Install [Bark](https://github.com/Finb/Bark) on iPhone and allow notifications on the lock screen.
 2. Copy your full push URL from Bark to the **Mac clipboard**, without a surrounding `curl` command.
@@ -197,7 +222,12 @@ Bark receives the device key and notification content. With session-name labels 
 
 Optional source icons: run `node scripts/bark-notifications.cjs --icon codex default` for the CodexLink icon and `--icon claude default` for the official Claude logo. Restart the Bridge and update installed Claude Hooks; already-running Claude sessions may keep the old sender until reopened. See [icon setup and previews](docs/setup.md#分别显示-codexlink-和-claude-图标), including iPhone image-download requirements.
 
+</details>
+
 ### 6. Optional: Claude Code notifications
+
+<details>
+<summary><strong>Install Claude notification Hooks and optional task titles</strong></summary>
 
 With Bark configured, add notifications for Claude Code running on the same Mac:
 
@@ -213,7 +243,12 @@ To distinguish Claude windows with identical names, optionally enable `node scri
 
 A Claude response notification does not mean all background work has finished. See the [Claude notification guide](docs/claude-notifications.md) (Chinese) for semantics, limitations, verification, and uninstall instructions.
 
+</details>
+
 ### 7. Optional: Claude sessions in the same app
+
+<details>
+<summary><strong>Connect Claude with clink; see commands and current limits</strong></summary>
 
 Complete app, Bridge, and pairing setup above. For lock-screen notifications, also complete step 6. Claude uses its existing official account login on Mac; no additional API key is needed.
 
@@ -236,14 +271,6 @@ clink                           # New session, named after the current folder
 
 Confirm **I am using this for local development** when Claude prompts, complete project/MCP consent on Mac, and keep the terminal open. Open **会话总览** in the iPhone sidebar and select a Claude session to send messages and read replies. **Claude 接入** in the toolbar keeps the dedicated list and setup instructions available. Use separate terminals for separate projects.
 
-<a id="claude-preview"></a>
-<p align="center">
-  <img src="docs/images/claude-list.png" width="280" alt="Offline demo of the Claude session list with a connected fictional to-do app project" />
-  <img src="docs/images/claude-approval.png" width="280" alt="Offline demo of messages in the same Claude session and a one-time tool approval with deny and allow controls" />
-</p>
-
-**Choose a session → read replies and review tool requests.** These are real SwiftUI views rendered with fictional offline data. Phone messaging is verified; the approval screen illustrates the implemented UI, while physical phone approval still needs acceptance.
-
 Other common commands:
 
 ```sh
@@ -257,13 +284,15 @@ Without the short command, use `node /path/to/CodexLink/scripts/claude-session.c
 Claude extension scope:
 
 - **Messages and notifications:** phone input reaches the same Mac session; Bark can notify when Claude finishes a response. Physical messaging and automatic lock-screen response notifications are verified. A response notification does not establish that all background work is complete.
-- **Quiet background progress:** Claude responses that report in-flight background tasks or scheduled wakeups do not send progress alerts. A later response without those activities can notify; approvals, input requests, and API errors still notify independently.
+- **Quiet background progress:** a main-session response can notify even while background tasks or scheduled wakeups remain. Background progress and subagent completion do not generate separate response alerts; repeated Stop events for the same turn are deduplicated. Approvals, input requests, and API errors notify independently.
 - **Existing terminals:** ordinary `claude` sessions do not automatically appear in the phone list. Automatic discovery and attaching the channel to an already-running session are not implemented. Ordinary sessions that loaded the notification Hooks can still notify independently.
 - **Close and resume:** leaving the phone view does not stop Mac work. Exiting the Mac CLI makes the session offline while retaining history. Find its Session ID with `/status` before exiting, then use `--resume` to continue it; omitting `--resume` creates a new session. Reading history still requires the Mac Bridge connection. Phone-side session launch and a complete offline history cache are not available.
 - **Models and controls:** change Claude's model with `/model` on Mac. The phone has no Claude model picker, Stop, or interactive-question responses. One-time tool approvals are implemented and the Mac relay was verified; phone approval, races, and outage recovery still need acceptance.
 - **Context and configuration:** channel instructions and reply-tool calls add token usage; local synchronization itself does not call a model. Only text and final responses recorded after integration are shared, without importing old transcripts or streaming full tool logs. The launcher accepts only `--name` and `--resume`; review any model, permission-mode, or prompt flags used in the previous launch separately.
 
 Channels is an official research preview. See the [Claude session guide](docs/claude-sessions.md) (Chinese) for setup, local storage, and limitations.
+
+</details>
 
 ## Daily use and updates
 
@@ -277,6 +306,62 @@ node scripts/private-service.cjs uninstall  # Remove service registration; prese
 The service runs an installed snapshot. After changing Bridge/Relay source, run `restart`. Swift changes require rebuilding and installing the app. These commands preserve pairing and do not restart the Mac or kill the Codex daemon.
 
 Your Mac must be awake and online for remote control. A launchd service does not prevent Mac sleep.
+
+## How it works
+
+```text
+Native Mac Codex TUI ──┐
+                      ├── Same Codex daemon / same Unix socket
+Mac Bridge ───────────┘
+    │
+    ├── Local Channel / Hooks ⇄ Claude Code (optional)
+    └── Private Relay ⇄ Tailscale ⇄ iPhone SwiftUI app
+                      (end-to-end encrypted after pairing)
+
+Codex events / Claude Hooks ── Optional event / session label → Bark → iPhone lock screen
+```
+
+<details>
+<summary><strong>Sessions, model settings, and connection details</strong></summary>
+
+A **Turn** is one task execution, ending in completion, failure, or interruption. Queue normally creates a later Turn; Steer adds input to the current Turn.
+
+The Codex composer shows the session's model and reasoning effort, with choices supplied by your Mac's model catalog. Changes apply to subsequent tasks and waiting Queue entries; they do not change the running Turn. Settings are confirmed by the same daemon, with existing approval and sandbox policies preserved. Reconnecting refreshes the configuration; uncertain changes are not automatically resent. Update both the iPhone app and the Bridge to use the selectors.
+
+Codex features require the CLI and Bridge to connect to the **same shared daemon**. Loading history or starting a separate App Server does not share a running task. Sessions started with `--no-daemon` are unsupported; some CLI `-c` overrides may also select an embedded runtime. The optional Claude integration uses the official Channels preview protocol and must be enabled when launching Claude.
+
+The phone and Mac can use different Wi-Fi or cellular networks; a Tailscale exit node is not required. Model requests use the Mac's account and network. The phone does not need the Claude app or a separate model-account login.
+
+</details>
+
+## What works today
+
+Physical-device results and remaining acceptance work are tracked separately. Expand for the current capability-by-capability scope.
+
+<details>
+<summary><strong>Validation status by capability</strong></summary>
+
+| Capability | Validation scope |
+| --- | --- |
+| Live Mac CLI output | Verified on a physical iPhone, including cellular access through Tailscale |
+| Steer during execution | Verified on the original Turn, without starting another task |
+| Persistent Queue | Idle and busy Queue verified on iPhone; the Mac daemon owns the queue |
+| Codex session model and reasoning effort | Isolated live-daemon check passed; user confirmed the phone model menu opens, applying a phone change to a task still needs acceptance |
+| Remote approvals | One-time approval verified; denial, races, and reconnect with pending approval need further validation |
+| Stop | Original Turn interruption verified; **already-backgrounded tool processes may keep running** |
+| Continue on Mac | The original Mac TUI remains usable after phone controls |
+| Reconnect | One Wi-Fi-to-cellular handoff and one Bridge crash recovery verified |
+| Bark lock-screen notifications | Physical test delivery verified; automatic completion accepted by provider; approval lock-screen delivery pending |
+| Claude Code notifications | User confirmed automatic response notification on the locked iPhone; simultaneous Codex/Claude completion and approval delivery pending |
+| Claude sessions and tool approvals | Preview via official Channels; physical iPhone message/reply verified in the same Mac session; approval relay verified on Mac, physical phone approval pending |
+| Codex + Claude session overview | Project grouping and attention/unread states; isolated simulator checks passed, complete physical-device interaction validation pending |
+| Open this session on Mac (iTerm) | Implemented, experimental; full physical-device flow and macOS Automation permissions still need validation |
+
+See the [validation summary](docs/validation.md) and [release readiness](docs/release-readiness.md). These are scoped results, not a claim of production reliability.
+
+Project maintenance: [changelog](CHANGELOG.md) · [developer handoff](docs/HANDOFF.md) (Chinese).
+
+</details>
 
 ## Troubleshooting
 
@@ -307,7 +392,24 @@ Bridge tests isolate device state and mock Keychain. Never point tests at a real
 
 Repeated outages, app force-quit, sleep/wake, daemon crashes, approval races, and long-running use need broader validation. Retained upstream UI for images, voice, Git, or MCP does not imply full support in shared mode. The installed app is named CodexLink. Source directories and technical identifiers retain their existing names for compatibility; this README defines the fork's supported workflow.
 
+<a id="project-docs"></a>
+
+## Documentation
+
+The setup and Claude guides, changelog, and handoff are currently in Chinese; this README includes the English setup path.
+
+| I want to… | Start here |
+| --- | --- |
+| Configure networking or renew signing | [Setup guide](docs/setup.md) |
+| Use Claude from my phone | [Claude sessions](docs/claude-sessions.md) |
+| Set up alerts, icons, and task titles | [Claude notifications](docs/claude-notifications.md) |
+| See what changed | [Changelog](CHANGELOG.md) |
+| Continue development or investigate a bug | [Developer handoff](docs/HANDOFF.md) |
+| Check verified capabilities and limitations | [Validation](docs/validation.md) · [Release readiness](docs/release-readiness.md) |
+
 ## License, privacy, and support
+
+Built on [RealDyllon/codex-remote](https://github.com/RealDyllon/codex-remote/tree/9a737fb), with thanks to the upstream project. This fork is distributed under the ISC license.
 
 See [LICENSE](LICENSE), [third-party notices](THIRD_PARTY_NOTICES.md), and [technical research](docs/research.md) (Chinese). Original ISC copyright and dependency notices are retained.
 

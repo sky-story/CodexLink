@@ -2,6 +2,18 @@
 
 README 使用两类图片：真实 SwiftUI 界面的离线演示截图，以及明确标记的通知效果示意图。均使用虚构内容，不是用户真实会话或端到端验收截图。
 
+## README 封面
+
+`readme-showcase.png` 和 `readme-showcase.zh-CN.png` 是中英文 README 的展示封面。采用黑白与绿色点缀，组合已有的 `session-queue.png`、`claude-approval.png`；完整缩放源图，保留原来的离线演示标记，不裁剪、改写或伪造 App 界面。封面上的 Claude 审批仍是界面示例，不代表手机审批已完成验收。
+
+复现命令（macOS + Pillow）：
+
+```sh
+python3 scripts/render-readme-showcase.py
+```
+
+脚本使用仓库已有的 Geist 字体、系统中文字体和公开演示截图，不下载素材，不读取个人配置，也不启动模拟器或连接运行中的服务。生成图片后同时检查两种语言是否有文字溢出，并在 README 的宽屏、窄屏布局中预览。
+
 ## 界面截图
 
 实际 SwiftUI 视图在独立 iOS Simulator 中渲染，使用源码内的虚构演示数据。截图外附有“演示数据 · 离线预览”标记，没有裁剪或修改界面内容。

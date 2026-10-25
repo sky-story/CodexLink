@@ -26,6 +26,12 @@ The session-overview and recovery changes dated 2026-10-18 passed source and sim
 
 Results below are from separate runs and **must not be added together as distinct tests**. The latest complete compiled iOS unit-target result appears first; earlier selective and complete-suite counts are historical.
 
+### README presentation refresh (2026-10-25)
+
+The English and Chinese READMEs were rendered with GitHub's Markdown API and reviewed in an isolated headless browser with GitHub-style CSS: **1200 × 1400** and **390 × 844** viewports, each in light and dark appearance, for **8 layout combinations**. All had zero page-level horizontal overflow, broken images, or missing explicit navigation anchors. All **9 disclosure sections** were opened and closed at phone width. Local checks resolved **88 relative links**, including **14 fragments**, across both READMEs and the image guide; all **31 pre-existing command/diagram blocks** were preserved.
+
+The two new covers compose existing fictional offline SwiftUI previews without cropping the source UI or removing their demo labels. [Image sources and generation](images/README.md) document the local, network-free renderer. Review artifacts remain in `.build/readme-refresh-20261025/`. This documentation-only update does not change iOS, Bridge/Relay, or installer behavior; no physical installation, runtime restart, model message, approval, or notification test was performed for it. The application test and deployment results below retain their original scope.
+
 ### Physical installation and documentation handoff (2026-10-25)
 
 After the user connected the iPhone, `scripts/install-iphone.py` freshly rebuilt, signed, backed up, overwrote, verified, and launched **1.4.1 (114)**. Receipt `.build/iphone-installer/runs/20261025-222017-ou_o50sb/receipt.json` is **installed_and_launched**, source digest prefix **c8e8cee7d042**. All **237 Swift source/test files** match the preceding **563/563 unit** and **8/8 UI** passing revision. All 3 persisted Application Support/Preferences files match the pre-install backup; 7 protected local configuration/signing files are unchanged, and all 8 observed core process identities remain unchanged. No Mac runtime was updated or restarted, and no model message, approval, interruption, or test push was sent. This installation supersedes the earlier “not installed” entries below; it does not establish long-term physical interaction acceptance.
