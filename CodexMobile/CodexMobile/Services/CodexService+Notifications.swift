@@ -8,6 +8,17 @@ import Foundation
 import UIKit
 import UserNotifications
 
+struct CodexNotificationNavigationRequest: Equatable {
+    let id: UUID
+    let threadId: String
+}
+
+struct CodexNotificationRoutingKey: Equatable {
+    let threadId: String
+    let requestID: UUID
+    let generation: UInt64
+}
+
 private enum CodexNotificationSource {
     static let runCompletion = "codex.runCompletion"
     static let structuredUserInput = "codex.structuredUserInput"
@@ -172,6 +183,9 @@ extension CodexService {
         SecureStore.writeString(token, for: CodexSecureKeys.pushDeviceToken)
 
         Task { @MainActor [weak self] in
+            // APNs callbacks can arrive before the launch permission refresh, or
+            // after permission changed in Settings. Do not publish stale gating.
+            await self?.refreshNotificationAuthorizationStatus()
             await self?.syncManagedPushRegistrationIfNeeded(force: true)
         }
     }
@@ -260,6 +274,7 @@ extension CodexService {
             return
         }
 
+        pendingNotificationOpenRequestID = UUID()
         pendingNotificationOpenThreadID = normalizedThreadId
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -277,15 +292,50 @@ extension CodexService {
     // Keeps push-tap intent alive across reconnect so cold-launch opens can resolve later.
     @discardableResult
     func routePendingNotificationOpenIfPossible(refreshIfNeeded: Bool = true) async -> Bool {
+        guard let threadId = pendingNotificationOpenThreadID else { return false }
+        let key = CodexNotificationRoutingKey(threadId: threadId, requestID: pendingNotificationOpenRequestID, generation: connectionGeneration)
+        if let existing = notificationRoutingTask, existing.key == key {
+            return await existing.task.value
+        }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return false }
+            defer {
+                if notificationRoutingTask?.key == key { notificationRoutingTask = nil }
+            }
+            guard pendingNotificationOpenThreadID == key.threadId,
+                  pendingNotificationOpenRequestID == key.requestID,
+                  connectionGeneration == key.generation else { return false }
+            return await performPendingNotificationRoute(refreshIfNeeded: refreshIfNeeded)
+        }
+        notificationRoutingTask = (key, task)
+        return await task.value
+    }
+
+    private func performPendingNotificationRoute(refreshIfNeeded: Bool) async -> Bool {
         guard let pendingThreadId = pendingNotificationOpenThreadID?
             .trimmingCharacters(in: .whitespacesAndNewlines),
               !pendingThreadId.isEmpty else {
             return false
         }
+        let requestID = pendingNotificationOpenRequestID
+        let generation = connectionGeneration
+        func isCurrentRoute() -> Bool {
+            pendingNotificationOpenThreadID == pendingThreadId
+                && pendingNotificationOpenRequestID == requestID
+                && connectionGeneration == generation
+        }
+        func presentTarget() {
+            guard presentedNotificationOpenRequestID != requestID else { return }
+            presentedNotificationOpenRequestID = requestID
+            notificationNavigationRequest = .init(id: requestID, threadId: pendingThreadId)
+        }
 
         if hasNotificationRoutingCandidate(threadId: pendingThreadId) {
             missingNotificationThreadPrompt = nil
-            if await prepareThreadForDisplay(threadId: pendingThreadId) {
+            presentTarget()
+            let prepared = await prepareThreadForDisplay(threadId: pendingThreadId)
+            guard isCurrentRoute() else { return false }
+            if prepared {
                 if pendingNotificationOpenThreadID == pendingThreadId {
                     pendingNotificationOpenThreadID = nil
                 }
@@ -306,6 +356,9 @@ extension CodexService {
         } else {
             didRefreshThreads = true
         }
+        // A newer tap or a replacement connection owns navigation now. An older
+        // list request must not steal focus or show a stale missing-thread alert.
+        guard isCurrentRoute() else { return false }
 
         guard hasNotificationRoutingCandidate(threadId: pendingThreadId) else {
             guard didRefreshThreads else {
@@ -318,7 +371,10 @@ extension CodexService {
         }
 
         missingNotificationThreadPrompt = nil
-        if await prepareThreadForDisplay(threadId: pendingThreadId) {
+        presentTarget()
+        let prepared = await prepareThreadForDisplay(threadId: pendingThreadId)
+        guard isCurrentRoute() else { return false }
+        if prepared {
             if pendingNotificationOpenThreadID == pendingThreadId {
                 pendingNotificationOpenThreadID = nil
             }

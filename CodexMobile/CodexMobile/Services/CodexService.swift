@@ -342,8 +342,9 @@ final class CodexService {
     var sharedControlStatus: [String: String] = [:]
     var sharedQueueText: [String: [String]] = [:]
     var isInitialized = false
-    // Invalidates replies and read-side work belonging to a retired connection.
-    @ObservationIgnored var connectionGeneration: UInt64 = 0
+    // Views must observe connection replacement even if the relay and visible
+    // readiness flags finish unchanged in the same UI update.
+    var connectionGeneration: UInt64 = 0
     @ObservationIgnored var threadListRefreshTask: Task<Void, Error>?
     @ObservationIgnored var threadListRefreshToken: UUID?
     @ObservationIgnored var threadListRefreshLimit: Int?
@@ -407,6 +408,10 @@ final class CodexService {
     var modelsErrorMessage: String?
     var notificationAuthorizationStatus: UNAuthorizationStatus = .notDetermined
     var pendingNotificationOpenThreadID: String?
+    var notificationNavigationRequest: CodexNotificationNavigationRequest?
+    @ObservationIgnored var pendingNotificationOpenRequestID = UUID()
+    @ObservationIgnored var presentedNotificationOpenRequestID: UUID?
+    @ObservationIgnored var notificationRoutingTask: (key: CodexNotificationRoutingKey, task: Task<Bool, Never>)?
     var supportsStructuredSkillInput = true
     // Runtime compatibility flag for `turn/start.collaborationMode` plan turns.
     var supportsTurnCollaborationMode = false
@@ -463,6 +468,7 @@ final class CodexService {
     var pendingRequests: [String: CheckedContinuation<RPCMessage, Error>] = [:]
     // Test hook: intercepts outbound RPC requests without requiring a live socket.
     @ObservationIgnored var requestTransportOverride: ((String, JSONValue?) async throws -> RPCMessage)?
+    @ObservationIgnored var commandConfirmationTimeout: Duration = .seconds(20)
     // Test hook: stubs trusted-session lookup without performing a real relay HTTP request.
     @ObservationIgnored var trustedSessionResolverOverride: (() async throws -> CodexTrustedSessionResolveResponse)?
     // Keeps the trusted-session HTTP lookup cancellable so manual retry can preempt a stuck resolve.

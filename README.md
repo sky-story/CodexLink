@@ -44,6 +44,8 @@ Also explore: **[Claude sessions and approvals](#claude-preview)** · **[Codex +
 
 See the [validation summary](docs/validation.md) and [release readiness](docs/release-readiness.md). These are scoped results, not a claim of production reliability.
 
+Project maintenance: [changelog](CHANGELOG.md) · [developer handoff](docs/HANDOFF.md) (Chinese).
+
 ## How it works
 
 ```text
@@ -191,7 +193,7 @@ node scripts/private-service.cjs restart
 
 A short event status appears in the title; the **session name and an eight-character identifier appear in the body**. Missing names fall back to the project directory name. Notifications are grouped per session. To disable labels, use `off` and restart.
 
-Bark receives the device key and notification content. With labels enabled, that includes the session name or project basename and short identifier. Chat previews, commands, code, full paths, and raw thread IDs are not sent. Avoid sensitive session names. Focus modes, notification summaries, and network conditions may delay or suppress delivery.
+Bark receives the device key and notification content. With session-name labels enabled, that includes the session name or project basename and short identifier. This mode does not read chat previews, commands, or code for the notification body, or send full paths and raw thread IDs. Avoid sensitive session names. Focus modes, notification summaries, and network conditions may delay or suppress delivery.
 
 Optional source icons: run `node scripts/bark-notifications.cjs --icon codex default` for the CodexLink icon and `--icon claude default` for the official Claude logo. Restart the Bridge and update installed Claude Hooks; already-running Claude sessions may keep the old sender until reopened. See [icon setup and previews](docs/setup.md#分别显示-codexlink-和-claude-图标), including iPhone image-download requirements.
 
@@ -206,6 +208,8 @@ node scripts/private-service.cjs restart
 ```
 
 Open a new Claude session to load the hooks. Codex and Claude can notify independently, including when CodexLink is closed. Claude's sender does not require the Codex Bridge to be running. Existing Claude settings and permission hooks are preserved and backed up before installation.
+
+To distinguish Claude windows with identical names, optionally enable `node scripts/bark-notifications.cjs --claude-task-labels on` after enabling session labels. This defaults to off. It shares a bounded excerpt of your current instruction with Bark and the lock screen, followed by the session/project context and short identifier; it is not a model-generated summary. Brief follow-ups retain the preceding meaningful title. Use `off` to disable it. See [task-label behavior and retention](docs/claude-notifications.md#用任务短标题区分多个窗口).
 
 A Claude response notification does not mean all background work has finished. See the [Claude notification guide](docs/claude-notifications.md) (Chinese) for semantics, limitations, verification, and uninstall instructions.
 
@@ -288,6 +292,8 @@ Your Mac must be awake and online for remote control. A launchd service does not
 Additional network, signing, and APNs details: [setup guide](docs/setup.md) (Chinese).
 
 ## Development and validation
+
+See the [handoff](docs/HANDOFF.md) for the current state and complete unit-test command. The unsigned command below checks compilation only; Keychain-backed unit tests require normal simulator signing.
 
 ```sh
 npm --prefix codex-remote-bridge test

@@ -5,7 +5,7 @@ CodexLink is suitable for **Alpha / developer-preview source distribution**, not
 ## Public source preparation
 
 - English default README and Chinese README include installation, fictional UI screenshots, and explicit capability boundaries.
-- Personal pairing state, notification credentials, handoff notes, raw device evidence, development experiments, and old screenshots are excluded from Git.
+- Personal pairing state, notification credentials, local private handoff notes, raw device evidence, development experiments, and old screenshots are excluded from Git. The public [developer handoff](HANDOFF.md) and [changelog](../CHANGELOG.md) are maintained with the source.
 - The public Xcode project uses neutral signing defaults. Local maintainer signing settings are preserved separately from the published Git content.
 - Original licenses and third-party notices remain included.
 - Privacy, terms, and support links point to this fork. Some inherited help screens still describe upstream functionality; use the README for the supported shared-daemon workflow.

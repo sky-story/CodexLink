@@ -7,7 +7,7 @@ private struct ClaudeSessionListSync: ViewModifier {
     var isEnabled: Bool
 
     private var pollKey: String {
-        "\(codex.sessionOverviewServerKey):\(codex.isConnected):\(codex.isInitialized):\(codex.supportsClaudeChannels):\(scenePhase == .active):\(isEnabled)"
+        "\(codex.sessionOverviewServerKey):\(codex.connectionGeneration):\(codex.isConnected):\(codex.isInitialized):\(codex.supportsClaudeChannels):\(scenePhase == .active):\(isEnabled)"
     }
 
     func body(content: Content) -> some View {

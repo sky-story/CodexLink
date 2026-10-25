@@ -1566,18 +1566,19 @@ final class TurnTimelineReducerTests: XCTestCase {
 
         XCTAssertEqual(
             normalized,
-            "W -->|Yes| X[Relay replaces old Mac socket<br/>4001 to old connection]"
+            #"W -->|Yes| X["Relay replaces old Mac socket<br/>4001 to old connection"]"#
         )
     }
 
     func testMermaidSourceNormalizerLeavesValidArrowLabelsUntouched() {
         let source = """
-        W -->|Yes| X[Relay replaces old Mac socket<br/>4001 to old connection]
+        W -->|Yes| X["Relay replaces old Mac socket<br/>4001 to old connection"]
         """
 
         let normalized = MermaidSourceNormalizer.normalized(source)
 
         XCTAssertEqual(normalized, source)
+        XCTAssertEqual(MermaidSourceNormalizer.normalized(normalized), normalized)
     }
 
     func testMermaidSourceNormalizerQuotesSquareNodeLabels() {
@@ -1758,7 +1759,7 @@ final class TurnTimelineReducerTests: XCTestCase {
         XCTAssertEqual(blockInfo[2]?.blockDiffEntries?.first?.deletions, 0)
     }
 
-    func testAssistantBlockInfoMergesDifferentSnapshotsForSameFile() {
+    func testAssistantBlockInfoKeepsDistinctHunksWithLatestAuthoritativeTotals() {
         let now = Date()
         let firstDiff = """
         @@ -1,3 +1,4 @@
@@ -1829,8 +1830,23 @@ final class TurnTimelineReducerTests: XCTestCase {
         )
 
         XCTAssertEqual(blockInfo[2]?.blockDiffEntries?.count, 1)
-        XCTAssertEqual(blockInfo[2]?.blockDiffEntries?.first?.additions, 2)
+        XCTAssertEqual(blockInfo[2]?.blockDiffEntries?.first?.additions, 1)
         XCTAssertEqual(blockInfo[2]?.blockDiffEntries?.first?.deletions, 0)
+        XCTAssertEqual(blockInfo[2]?.blockDiffText?.contains("firstChange"), true)
+        XCTAssertEqual(blockInfo[2]?.blockDiffText?.contains("secondChange"), true)
+    }
+
+    func testFileChangeSummaryAcceptsASCIIAndUnicodeTotalsWithoutLosingPaths() throws {
+        for plus in ["+", "＋"] {
+            for minus in ["-", "−", "–", "—", "﹣", "－"] {
+                let source = "Edited Sources/App.swift \(plus)3 \(minus)1"
+                let entry = try XCTUnwrap(TurnFileChangeSummaryParser.parse(from: source)?.entries.first)
+                XCTAssertEqual(entry.path, "Sources/App.swift", source)
+                XCTAssertEqual(entry.additions, 3, source)
+                XCTAssertEqual(entry.deletions, 1, source)
+                XCTAssertEqual(TurnFileChangeSummaryParser.removingInlineEditingRows(from: source), "", source)
+            }
+        }
     }
 
     func testAssistantBlockInfoPrefersLatestSummaryTotalsAfterDiffChunk() {

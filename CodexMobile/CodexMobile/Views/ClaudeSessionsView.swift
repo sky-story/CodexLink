@@ -73,7 +73,7 @@ struct ClaudeConversationView: View {
     @State private var permissionToAllow: ClaudePermission?
     @State private var selectedMessage: SelectableMessageTextSheetState?
     private var pollKey: String {
-        "\(codex.sessionOverviewServerKey):\(codex.isConnected):\(codex.isInitialized):\(codex.supportsClaudeChannels):\(scenePhase == .active):\(codex.normalizedRelaySessionId ?? "")"
+        "\(codex.sessionOverviewServerKey):\(codex.connectionGeneration):\(codex.isConnected):\(codex.isInitialized):\(codex.supportsClaudeChannels):\(scenePhase == .active):\(codex.normalizedRelaySessionId ?? "")"
     }
     private var canSend: Bool { model.canSend(codex) }
 
@@ -85,54 +85,85 @@ struct ClaudeConversationView: View {
     var body: some View {
         VStack(spacing: 0) {
             statusBar
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
-                    if model.nextBefore != nil { Button("加载更早消息") { Task { await refresh(older: true) } }.disabled(model.loading || !model.canRead(codex)) }
-                    if model.messages.isEmpty { Text("发送一条消息，与 Mac 上的 Claude 继续对话。接入前的历史不会自动导入。")
-                        .font(.callout).foregroundStyle(.secondary).padding(.vertical, 24) }
-                    ForEach(model.messages) { message in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(message.role == "assistant" ? "Claude" : message.source == "mac" ? "你 · Mac" : "你 · iPhone")
-                                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                            if message.role == "assistant" {
-                                MarkdownTextView(text: message.text, profile: .claudeProse, constrainsToAvailableWidth: true)
-                                    .contextMenu {
-                                        Button("复制回复", systemImage: "doc.on.doc") {
-                                            UIPasteboard.general.string = message.text
-                                        }
-                                        Button("选择文字", systemImage: "text.cursor") {
-                                            selectedMessage = .init(role: .assistant, text: message.text, usesMarkdownSelection: true, markdownProfile: .claudeProse)
-                                        }
-                                    }
-                                CopyBlockButton(text: message.text)
-                            } else {
-                                Text(message.text).font(AppFont.body()).textSelection(.enabled)
-                            }
-                            if let receipt = model.snapshot?.receipts.first(where: { $0.id == message.id }) {
-                                Text(receipt.statusLabel).font(.caption).foregroundStyle(.secondary)
-                            }
+            ScrollViewReader { scroll in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 16) {
+                        if model.nextBefore != nil {
+                            Button("加载更早消息") {
+                                let firstVisibleID = model.messages.first?.id
+                                Task {
+                                    await refresh(older: true)
+                                    guard let firstVisibleID, model.messages.first?.id != firstVisibleID else { return }
+                                    // Keep the adjacent message in view when older
+                                    // rows are inserted above it in the lazy stack.
+                                    await Task.yield()
+                                    scroll.scrollTo(firstVisibleID, anchor: .top)
+                                }
+                            }.disabled(model.loading || !model.canRead(codex))
                         }
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(message.role == "assistant" ? Color(.secondarySystemBackground) : Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                    }
-                    ForEach(model.snapshot?.permissions ?? []) { permission in permissionCard(permission) }
-                    ForEach(model.unconfirmed) { operation in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("有一项操作的发送结果尚未确认。请核对本会话和 Mac，避免重复发送。")
-                            Button("我已核对，继续操作") {
-                                model.dismiss(operation, using: codex)
+                        if model.messages.isEmpty { historyPlaceholder }
+                        ForEach(model.messages) { message in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(message.role == "assistant" ? "Claude" : message.source == "mac" ? "你 · Mac" : "你 · iPhone")
+                                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                if message.role == "assistant" {
+                                    MarkdownTextView(text: message.text, profile: .claudeProse, constrainsToAvailableWidth: true)
+                                        .contextMenu {
+                                            Button("复制回复", systemImage: "doc.on.doc") {
+                                                UIPasteboard.general.string = message.text
+                                            }
+                                            Button("选择文字", systemImage: "text.cursor") {
+                                                selectedMessage = .init(role: .assistant, text: message.text, usesMarkdownSelection: true, markdownProfile: .claudeProse)
+                                            }
+                                        }
+                                    CopyBlockButton(text: message.text)
+                                } else {
+                                    Text(message.text).font(AppFont.body()).textSelection(.enabled)
+                                }
+                                if let receipt = model.snapshot?.receipts.first(where: { $0.id == message.id }) {
+                                    Text(receipt.statusLabel).font(.caption).foregroundStyle(.secondary)
+                                }
                             }
-                        }.font(.footnote).padding().background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(message.role == "assistant" ? Color(.secondarySystemBackground) : Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                            .id(message.id)
+                        }
+                        ForEach(model.snapshot?.permissions ?? []) { permission in permissionCard(permission) }
+                        ForEach(model.unconfirmed) { operation in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("有一项操作的发送结果尚未确认。请核对本会话和 Mac，避免重复发送。")
+                                Button("我已核对，继续操作") {
+                                    model.dismiss(operation, using: codex)
+                                }
+                            }.font(.footnote).padding().background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        Color.clear.frame(height: 1).id("claude-history-end")
+                    }.padding()
+                }
+                .defaultScrollAnchor(.bottom)
+                .refreshable { await refresh() }
+                .onChange(of: model.messages.isEmpty) { wasEmpty, isEmpty in
+                    guard wasEmpty && !isEmpty else { return }
+                    // A bottom anchor can retain estimated LazyVStack row heights
+                    // when a delayed first page arrives. Resolve the actual end once;
+                    // ordinary polling and pagination must preserve reading position.
+                    Task { @MainActor in
+                        await Task.yield()
+                        scroll.scrollTo("claude-history-end", anchor: .bottom)
                     }
-                }.padding()
+                }
             }
-            .defaultScrollAnchor(.bottom)
-            .refreshable { await refresh() }
             composer
         }
         .navigationTitle(model.snapshot?.session.name ?? initialName)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("刷新对话", systemImage: "arrow.clockwise") { Task { await refresh() } }
+                    .disabled(model.loading || !model.canRead(codex))
+            }
+        }
         .task(id: pollKey) {
             model.updatePending(codex)
             while !Task.isCancelled && model.canRead(codex) && scenePhase == .active {
@@ -148,6 +179,34 @@ struct ClaudeConversationView: View {
         } message: { Text("请先核对工具及操作参数。此决定只用于当前请求，不修改后续权限。") }
     }
 
+    @ViewBuilder
+    private var historyPlaceholder: some View {
+        if !model.canRead(codex) {
+            ContentUnavailableView("等待连接 Mac", systemImage: "wifi.slash",
+                description: Text("连接恢复后会自动加载此会话的记录。"))
+        } else if model.snapshot == nil && model.loading {
+            ProgressView("正在加载对话…")
+                .accessibilityIdentifier("claude-history-loading")
+                .frame(maxWidth: .infinity).padding(.vertical, 40)
+        } else if let error = model.errorMessage {
+            VStack(spacing: 12) {
+                ContentUnavailableView("对话暂时未能加载", systemImage: "exclamationmark.bubble",
+                    description: Text(error))
+                Button("重新加载") { Task { await refresh() } }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("claude-history-retry")
+                    .disabled(model.loading)
+            }
+        } else if model.snapshot == nil {
+            ProgressView("正在加载对话…")
+                .accessibilityIdentifier("claude-history-loading")
+                .frame(maxWidth: .infinity).padding(.vertical, 40)
+        } else {
+            ContentUnavailableView("暂无已同步消息", systemImage: "text.bubble",
+                description: Text("这里只显示接入 CodexLink 后的消息。可继续在 Mac 对话，也可从下方发送消息。"))
+        }
+    }
+
     private var statusBar: some View {
         VStack(alignment: .leading, spacing: 4) {
             if !model.isCurrentHost(codex) {
@@ -158,10 +217,12 @@ struct ClaudeConversationView: View {
                 Text("正在恢复会话状态…")
             } else if !codex.supportsClaudeChannels {
                 Text("更新 Mac 后台服务后，即可使用 Claude 会话。")
+            } else if model.snapshot == nil && model.errorMessage != nil && !model.loading {
+                Text("对话读取失败")
             } else {
                 Text(model.snapshot?.session.statusLabel ?? "读取会话…")
             }
-            if let errorMessage = model.errorMessage { Text(errorMessage).foregroundStyle(.red) }
+            if !model.messages.isEmpty, let errorMessage = model.errorMessage { Text(errorMessage).foregroundStyle(.red) }
         }.font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal).padding(.vertical, 8)
     }
 

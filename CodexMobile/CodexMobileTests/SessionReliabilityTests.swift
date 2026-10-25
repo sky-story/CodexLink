@@ -2,6 +2,23 @@ import XCTest
 import Observation
 @testable import CodexMobile
 
+private final class HistoryWriteRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValues: [String] = []
+    private var active = 0
+    private var maximum = 0
+
+    var values: [String] { lock.lock(); defer { lock.unlock() }; return storedValues }
+    var maximumConcurrentWrites: Int { lock.lock(); defer { lock.unlock() }; return maximum }
+    func begin(_ value: String) {
+        lock.lock(); defer { lock.unlock() }
+        storedValues.append(value)
+        active += 1
+        maximum = max(maximum, active)
+    }
+    func end() { lock.lock(); active -= 1; lock.unlock() }
+}
+
 @MainActor
 final class SessionReliabilityTests: XCTestCase {
     private static var retained: [CodexService] = []
@@ -26,6 +43,176 @@ final class SessionReliabilityTests: XCTestCase {
         "macTerminalOpen": .bool(true), "claudeChannels": .bool(true),
         "futureOptionalField": .object(["unknown": .bool(true)])
     ])
+
+    func testHistoryWriterCoalescesPendingSnapshotsAndOrdersLifecycleFlush() async {
+        let started = expectation(description: "first snapshot is writing")
+        let release = DispatchSemaphore(value: 0)
+        let recorder = HistoryWriteRecorder()
+        let writer = CodexMessageHistoryWriter { snapshot in
+            let text = snapshot["chat"]?.first?.text ?? "deleted"
+            recorder.begin(text)
+            if text == "old" {
+                started.fulfill()
+                _ = release.wait(timeout: .now() + 3)
+            }
+            recorder.end()
+        }
+        func snapshot(_ text: String) -> [String: [CodexMessage]] {
+            ["chat": [CodexMessage(threadId: "chat", role: .assistant, text: text)]]
+        }
+        writer.enqueue(snapshot("old"))
+        await fulfillment(of: [started], timeout: 2)
+        writer.enqueue(snapshot("superseded"))
+        writer.enqueue(snapshot("newest"))
+        release.signal()
+        writer.withSerialAccess {}
+        XCTAssertEqual(recorder.values, ["old", "newest"])
+        XCTAssertEqual(recorder.maximumConcurrentWrites, 1)
+        writer.enqueue([:])
+        writer.withSerialAccess {}
+        XCTAssertEqual(recorder.values.last, "deleted", "A lifecycle save must finish after every older snapshot")
+    }
+
+    func testNotificationForAlreadySelectedThreadStillPublishesEveryTap() async throws {
+        let service = service()
+        service.isConnected = false
+        service.threads = [CodexThread(id: "chat")]
+        service.activeThreadId = "chat"
+        service.handleNotificationOpen(threadId: "chat", turnId: nil)
+        _ = await service.routePendingNotificationOpenIfPossible()
+        let first = try XCTUnwrap(service.notificationNavigationRequest)
+        XCTAssertEqual(first.threadId, "chat")
+        service.notificationNavigationRequest = nil
+        service.handleNotificationOpen(threadId: "chat", turnId: nil)
+        _ = await service.routePendingNotificationOpenIfPossible()
+        let second = try XCTUnwrap(service.notificationNavigationRequest)
+        XCTAssertNotEqual(first.id, second.id)
+        XCTAssertNil(service.pendingNotificationOpenThreadID)
+    }
+
+    func testOlderNotificationLookupCannotStealNewerSelection() async {
+        let service = service()
+        service.syncRealtimeEnabled = false
+        let started = expectation(description: "old notification list lookup")
+        var release: CheckedContinuation<RPCMessage, Never>?
+        service.requestTransportOverride = { method, params in
+            XCTAssertEqual(method, "thread/list", "Stale notification must not resume its old thread")
+            if params?.objectValue?["archived"]?.boolValue == true || release != nil {
+                return RPCMessage(id: .integer(1), result: .object(["data": .array([])]))
+            }
+            return await withCheckedContinuation { release = $0; started.fulfill() }
+        }
+        service.pendingNotificationOpenThreadID = "old"
+        let old = Task { await service.routePendingNotificationOpenIfPossible() }
+        await fulfillment(of: [started], timeout: 2)
+        service.threads = [CodexThread(id: "new")]
+        service.resumedThreadIDs.insert("new")
+        service.handleNotificationOpen(threadId: "new", turnId: nil)
+        _ = await service.routePendingNotificationOpenIfPossible()
+        release?.resume(returning: RPCMessage(id: .integer(1), result: .object([
+            "data": .array([.object(["id": .string("old")]), .object(["id": .string("new")])])
+        ])))
+        let routedOld = await old.value
+        XCTAssertFalse(routedOld)
+        XCTAssertEqual(service.activeThreadId, "new")
+        XCTAssertEqual(service.notificationNavigationRequest?.threadId, "new")
+        XCTAssertNil(service.missingNotificationThreadPrompt)
+    }
+
+    func testSharedControlRejectsMismatchedAndIncompleteReceipts() async throws {
+        for badField in ["commandId", "threadId", "action", "status"] {
+            let service = service()
+            service.supportsSharedSessionControl = true
+            service.requestTransportOverride = { _, params in
+                var receipt = params!.objectValue!
+                receipt["status"] = .string("queued")
+                receipt[badField] = .string("wrong")
+                return RPCMessage(id: .integer(1), result: .object(receipt))
+            }
+            do {
+                try await service.sharedControl(threadID: "chat", action: "queue", text: "once")
+                XCTFail("Invalid receipt must not confirm a send: \(badField)")
+            } catch {}
+            XCTAssertEqual(service.defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix("shared-control-pending-") }.count, 1)
+            XCTAssertTrue(service.sharedControlStatus["chat"]?.contains("不确定") == true)
+        }
+    }
+
+    func testSharedControlUnknownReceiptRetainsTrackingUntilConfirmed() async throws {
+        let service = service()
+        service.supportsSharedSessionControl = true
+        var receipt: [String: JSONValue] = [:]
+        service.requestTransportOverride = { _, params in
+            receipt = params!.objectValue!
+            receipt["status"] = .string("unknown")
+            return RPCMessage(id: .integer(1), result: .object(receipt))
+        }
+        do { try await service.sharedControl(threadID: "chat", action: "queue", text: "once"); XCTFail() } catch {}
+        let key = "shared-control-pending-\(try XCTUnwrap(receipt["commandId"]?.stringValue))"
+        XCTAssertNotNil(service.defaults.data(forKey: key))
+        receipt["status"] = .string("queued")
+        receipt["threadId"] = .string("wrong-chat")
+        service.applySharedReceipt(.object(receipt))
+        XCTAssertNotNil(service.defaults.data(forKey: key))
+        receipt["threadId"] = .string("chat")
+        service.applySharedReceipt(.object(receipt))
+        XCTAssertNil(service.defaults.data(forKey: key))
+    }
+
+    func testExplicitSharedControlRejectionDoesNotLeaveUncertainCommand() async {
+        let service = service()
+        service.supportsSharedSessionControl = true
+        service.requestTransportOverride = { _, _ in
+            throw CodexServiceError.rpcError(RPCError(code: -32602, message: "Invalid command"))
+        }
+        do { try await service.sharedControl(threadID: "chat", action: "queue", text: "once"); XCTFail() } catch {}
+        XCTAssertFalse(service.defaults.dictionaryRepresentation().keys.contains { $0.hasPrefix("shared-control-pending-") })
+        XCTAssertEqual(service.sharedControlStatus["chat"], "Invalid command")
+    }
+
+    func testStalledSharedSendTimesOutWithoutReplayAndRecoversByReceipt() async throws {
+        let service = service()
+        service.supportsSharedSessionControl = true
+        service.commandConfirmationTimeout = .milliseconds(40)
+        let started = expectation(description: "command sent")
+        let finished = expectation(description: "confirmation wait ended")
+        var release: CheckedContinuation<RPCMessage, Never>?
+        var receipt: [String: JSONValue] = [:]
+        var methods: [String] = []
+        service.requestTransportOverride = { method, params in
+            methods.append(method)
+            receipt = params!.objectValue!
+            receipt["status"] = .string("queued")
+            return await withCheckedContinuation { release = $0; started.fulfill() }
+        }
+        let send = Task {
+            do { try await service.sharedControl(threadID: "chat", action: "queue", text: "once"); XCTFail() }
+            catch { XCTAssertTrue(error.localizedDescription.contains("不确定")) }
+            finished.fulfill()
+        }
+        await fulfillment(of: [started, finished], timeout: 2)
+        let key = "shared-control-pending-\(try XCTUnwrap(receipt["commandId"]?.stringValue))"
+        XCTAssertNotNil(service.defaults.data(forKey: key))
+        XCTAssertTrue(service.pendingRequests.isEmpty)
+        release?.resume(returning: RPCMessage(id: .integer(1), result: .object(receipt)))
+        await send.value
+        for _ in 0..<3 { await Task.yield() }
+        XCTAssertNotNil(service.defaults.data(forKey: key), "Late wire replies must not silently confirm a timed-out command")
+        service.requestTransportOverride = { method, _ in
+            methods.append(method)
+            let result: JSONValue
+            switch method {
+            case "thread/read": result = .object(["thread": .object(["id": .string("chat"), "model": .string("fixture")])])
+            case "remote/receipts": result = .object(["data": .array([.object(receipt)])])
+            case "remote/sync": result = .object(["approvals": .array([])])
+            default: result = .object(["data": .array([])])
+            }
+            return RPCMessage(id: .integer(1), result: result)
+        }
+        await service.recoverSharedControl(threadID: "chat")
+        XCTAssertNil(service.defaults.data(forKey: key))
+        XCTAssertEqual(methods.filter { $0 == "remote/control" }.count, 1)
+    }
 
     func testModernUserItemIsVisibleBeforeItsReplyAndIsNotDuplicated() {
         let service = service()

@@ -18,7 +18,9 @@ struct ClaudeSession: Codable, Identifiable, Equatable, Sendable {
         case "working": return "正在处理"
         case "approval": return "等待审批"
         case "failed": return "本轮出错，请查看 Mac"
-        default: return verified ? "已连接" : "已连接，等待首条回复验证"
+        // Verification covers a reply to a phone-originated message. Mac history
+        // remains readable even if the owner only uses the phone for viewing.
+        default: return "已连接"
         }
     }
 }
@@ -55,6 +57,8 @@ struct ClaudeCommandReceipt: Codable, Identifiable, Equatable, Sendable {
     let status: String
     let detail: String?
     let updatedAt: Double
+
+    var confirmsDeliveryOutcome: Bool { ["queued", "sent", "replied", "failed"].contains(status) }
 
     var statusLabel: String {
         switch status {

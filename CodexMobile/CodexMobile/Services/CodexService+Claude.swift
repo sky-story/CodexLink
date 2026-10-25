@@ -11,7 +11,7 @@ extension CodexService {
 
     func listClaudeSessions() async throws -> [ClaudeSession] {
         struct Result: Decodable { let data: [ClaudeSession] }
-        let response = try await sendRequest(method: "claude/sessions", params: nil)
+        let response = try await sendRequest(method: "claude/sessions", params: nil, timeout: .seconds(12))
         return try decodeClaude(Result.self, from: response.result).data
     }
 
@@ -89,7 +89,7 @@ extension CodexService {
         try requireClaudeConnection(server: server)
         var params: [String: JSONValue] = ["sessionId": .string(id)]
         if let before { params["before"] = .integer(before) }
-        let response = try await sendRequest(method: "claude/snapshot", params: .object(params))
+        let response = try await sendRequest(method: "claude/snapshot", params: .object(params), timeout: .seconds(12))
         try requireClaudeConnection(server: server)
         let snapshot = try decodeClaude(ClaudeSnapshot.self, from: response.result)
         guard snapshot.session.id == id else { throw CodexServiceError.invalidResponse("会话身份不匹配") }
@@ -142,9 +142,10 @@ extension CodexService {
                   (try? requireClaudeConnection(server: server)) != nil else { return }
             guard let response = try? await sendRequest(method: "claude/receipt", params: .object([
                 "sessionId": .string(sessionID), "commandId": .string(operation.id)
-            ])), let receipt = response.result?.objectValue?["receipt"], receipt != .null,
+            ]), timeout: .seconds(12)), let receipt = response.result?.objectValue?["receipt"], receipt != .null,
                   let decoded = try? decodeClaude(ClaudeCommandReceipt.self, from: receipt),
                   decoded.id == operation.id, decoded.sessionId == sessionID,
+                  decoded.action == operation.action, decoded.confirmsDeliveryOutcome,
                   generation == connectionGeneration,
                   (try? requireClaudeConnection(server: server)) != nil else { continue }
             dismissClaudeUnconfirmed(operation)
@@ -176,20 +177,28 @@ extension CodexService {
         } else { params["message"] = .string(text!) }
         // Persist identity before socket write; recovery queries receipts only.
         try saveClaudeOperations(storedClaudeOperations() + [operation])
+        let receipt: ClaudeCommandReceipt
         do {
-            let response = try await sendRequest(method: action == "message" ? "claude/send" : "claude/permission", params: .object(params))
+            let response = try await sendRequest(
+                method: action == "message" ? "claude/send" : "claude/permission", params: .object(params),
+                timeout: commandConfirmationTimeout, timeoutMessage: "未能及时确认发送结果，请先核对会话。"
+            )
             try requireClaudeConnection(server: server)
-            let receipt = try decodeClaude(ClaudeCommandReceipt.self, from: response.result)
-            guard receipt.id == operation.id, receipt.sessionId == session.id else {
+            receipt = try decodeClaude(ClaudeCommandReceipt.self, from: response.result)
+            guard receipt.id == operation.id, receipt.sessionId == session.id,
+                  receipt.action == action, receipt.confirmsDeliveryOutcome else {
                 throw CodexServiceError.invalidResponse("操作回执身份不匹配")
             }
-            dismissClaudeUnconfirmed(operation)
-            return receipt
         } catch {
             if case CodexServiceError.rpcError(let rpc) = error, [-32601, -32602].contains(rpc.code) {
                 dismissClaudeUnconfirmed(operation); throw error
             }
             throw CodexServiceError.invalidInput("发送结果不确定。请先核对会话；系统不会自动重发。")
         }
+        dismissClaudeUnconfirmed(operation)
+        guard receipt.status != "failed" else {
+            throw CodexServiceError.invalidInput(receipt.detail ?? "Mac 未执行这项操作，请核对会话。")
+        }
+        return receipt
     }
 }

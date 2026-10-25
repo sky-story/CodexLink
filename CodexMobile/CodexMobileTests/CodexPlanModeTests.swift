@@ -58,6 +58,8 @@ final class CodexPlanModeTests: XCTestCase {
             "medium"
         )
 
+        service.clearRunningState(for: "thread-plan")
+        service.setActiveTurnID(nil, for: "thread-plan")
         viewModel.input = "Normal follow-up"
         viewModel.sendTurn(codex: service, threadID: "thread-plan")
         await waitForSendCompletion(viewModel)
@@ -120,8 +122,8 @@ final class CodexPlanModeTests: XCTestCase {
             .objectValue?["developer_instructions"]?
             .stringValue
         XCTAssertNil(instructions)
-        XCTAssertTrue(service.allowsInferredPlanQuestionnaireFallback(for: "thread-plan"))
-        XCTAssertTrue(service.allowsAssistantPlanFallbackRecovery(for: "thread-plan"))
+        XCTAssertFalse(service.allowsInferredPlanQuestionnaireFallback(for: "thread-plan"))
+        XCTAssertFalse(service.allowsAssistantPlanFallbackRecovery(for: "thread-plan"))
     }
 
     func testCompatibilityFallbackCanOverrideNativePlanThread() {
@@ -135,13 +137,13 @@ final class CodexPlanModeTests: XCTestCase {
         XCTAssertEqual(service.currentPlanSessionSource(for: "thread-plan"), .compatibilityFallback)
     }
 
-    func testAssistantFallbackRecoveryRemainsAvailableForNativePlanThread() {
+    func testNativePlanThreadDoesNotInferInteractivePromptsFromProse() {
         let service = makeService()
 
         service.markNativePlanSession(for: "thread-plan")
 
         XCTAssertFalse(service.allowsInferredPlanQuestionnaireFallback(for: "thread-plan"))
-        XCTAssertTrue(service.allowsAssistantPlanFallbackRecovery(for: "thread-plan"))
+        XCTAssertFalse(service.allowsAssistantPlanFallbackRecovery(for: "thread-plan"))
     }
 
     func testPlanSessionSourcePersistsAcrossRelaunch() {
@@ -274,7 +276,7 @@ final class CodexPlanModeTests: XCTestCase {
             let requestParams = params ?? .null
             capturedTurnStartParams.append(requestParams)
 
-            if capturedTurnStartParams.count == 1 {
+            if requestParams.objectValue?["collaborationMode"] != nil {
                 throw CodexServiceError.rpcError(
                     RPCError(
                         code: -32600,
@@ -336,6 +338,7 @@ final class CodexPlanModeTests: XCTestCase {
                     result: .object([
                         "thread": .object([
                             "id": .string(threadId ?? continuationThreadID),
+                            "title": .string("Continuation fixture"),
                         ]),
                     ]),
                     includeJSONRPC: false
@@ -347,6 +350,7 @@ final class CodexPlanModeTests: XCTestCase {
                     result: .object([
                         "thread": .object([
                             "id": .string(continuationThreadID),
+                            "title": .string("Continuation fixture"),
                         ]),
                     ]),
                     includeJSONRPC: false
@@ -492,6 +496,11 @@ final class CodexPlanModeTests: XCTestCase {
 
         var capturedTurnStartParams: JSONValue?
         service.requestTransportOverride = { method, params in
+            if method == "thread/read" {
+                return RPCMessage(id: .string(UUID().uuidString), result: .object([
+                    "thread": .object(["turns": .array([])])
+                ]), includeJSONRPC: false)
+            }
             XCTAssertEqual(method, "turn/start")
             capturedTurnStartParams = params
             return RPCMessage(
@@ -581,6 +590,9 @@ final class CodexPlanModeTests: XCTestCase {
     func testPlanModeSendFailureRearmsToggleAndSkipsFallbackRequest() async {
         let service = makeService()
         service.isConnected = true
+        service.supportsTurnCollaborationMode = true
+        service.resumedThreadIDs.insert("thread-plan-failure")
+        service.threads.append(CodexThread(id: "thread-plan-failure", title: "Plan failure fixture"))
 
         var attemptedRequestCount = 0
         service.requestTransportOverride = { _, _ in
@@ -830,7 +842,7 @@ final class CodexPlanModeTests: XCTestCase {
         XCTAssertEqual(promptMessages[0].turnId, turnID)
     }
 
-    func testStructuredUserInputPromptPersistsAcrossRelaunchUntilResolved() {
+    func testStructuredUserInputPromptPersistsAcrossRelaunchUntilResolved() async throws {
         let suiteName = "CodexPlanModeTests.Persistence.\(UUID().uuidString)"
         let threadID = "thread-\(UUID().uuidString)"
         let turnID = "turn-\(UUID().uuidString)"
@@ -866,10 +878,16 @@ final class CodexPlanModeTests: XCTestCase {
             )
         )
 
+        XCTAssertEqual(firstService.messages(for: threadID).filter { $0.kind == .userInputPrompt }.count, 1)
+        await firstService.messagePersistenceDebounceTask?.value
+        // Model the final lifecycle flush. Other test services share this simulator's cache path.
+        firstService.messagePersistence.save(firstService.messagesByThread)
+        XCTAssertNotNil(SecureStore.readData(for: CodexSecureKeys.messageHistoryKey), "Encrypted relaunch requires a persisted key")
+
         let relaunchedService = makeService(suiteName: suiteName, reset: false)
         let promptMessages = relaunchedService.messages(for: threadID).filter { $0.kind == .userInputPrompt }
         XCTAssertEqual(promptMessages.count, 1)
-        XCTAssertEqual(promptMessages[0].structuredUserInputRequest?.questions.first?.id, "path")
+        XCTAssertEqual(try XCTUnwrap(promptMessages.first).structuredUserInputRequest?.questions.first?.id, "path")
     }
 
     func testStructuredUserInputPromptWithoutTurnIDStillCreatesPromptCard() {
@@ -1469,6 +1487,11 @@ final class CodexPlanModeTests: XCTestCase {
 
         var capturedParams: JSONValue?
         service.requestTransportOverride = { method, params in
+            if method == "thread/read" {
+                return RPCMessage(id: .string(UUID().uuidString), result: .object([
+                    "thread": .object(["turns": .array([])])
+                ]), includeJSONRPC: false)
+            }
             XCTAssertEqual(method, "turn/start")
             capturedParams = params
             return RPCMessage(
@@ -1490,7 +1513,7 @@ final class CodexPlanModeTests: XCTestCase {
 
         XCTAssertEqual(
             textInput(from: capturedParams),
-            "Implement the latest approved plan from the most recent <proposed_plan> in this thread."
+            "Implement plan."
         )
     }
 
@@ -1689,6 +1712,9 @@ final class CodexPlanModeTests: XCTestCase {
         if reset {
             service.messagesByThread = [:]
         }
+        service.isInitialized = true
+        service.resumedThreadIDs.insert("thread-plan")
+        service.threads = [CodexThread(id: "thread-plan", title: "Plan fixture")]
         Self.retainedServices.append(service)
         return service
     }

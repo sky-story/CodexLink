@@ -25,6 +25,8 @@ private struct ClaudeConversationRoute: Hashable {
     let server: String
     let sessionID: String
     let name: String
+
+    var id: AgentSessionSummary.ID { .init(server: server, provider: .claude, session: sessionID) }
 }
 
 struct ContentView: View {
@@ -38,7 +40,10 @@ struct ContentView: View {
     @State private var sidebarDragOffset: CGFloat = 0
     @State private var isSidebarPrewarmed = false
     @State private var selectedThread: CodexThread?
+    @State private var selectedProvider: AgentSessionProvider = .codex
+    @State private var selectedClaudeConversation: ClaudeConversationRoute?
     @State private var navigationPath = NavigationPath()
+    @State private var claudeNavigationPath = NavigationPath()
     @State private var showSettings = false
     @State private var isShowingManualScanner = false
     @State private var hasDismissedAutomaticScanner = false
@@ -100,7 +105,8 @@ struct ContentView: View {
             }
             .onChange(of: showSettings) { _, show in
                 if show {
-                    navigationPath.append("settings")
+                    if selectedProvider == .claude { claudeNavigationPath.append("settings") }
+                    else { navigationPath.append("settings") }
                     showSettings = false
                 }
             }
@@ -125,6 +131,9 @@ struct ContentView: View {
                 if isSidebarOpen {
                     closeSidebar()
                 }
+            }
+            .onChange(of: claudeNavigationPath) { _, _ in
+                if isSidebarOpen { closeSidebar() }
             }
             .onChange(of: selectedThread) { previousThread, thread in
                 debugSidebarLog("selectedThread changed from=\(previousThread?.id ?? "nil") to=\(thread?.id ?? "nil")")
@@ -151,6 +160,15 @@ struct ContentView: View {
                     return
                 }
                 selectedThread = matchingThread
+            }
+            .onChange(of: codex.notificationNavigationRequest, initial: true) { _, request in
+                guard let request,
+                      let thread = codex.threads.first(where: { $0.id == request.threadId }) else { return }
+                selectedProvider = .codex
+                navigationPath = NavigationPath()
+                selectedThread = thread
+                closeSidebar()
+                codex.notificationNavigationRequest = nil
             }
             .onChange(of: codex.threads) { _, threads in
                 debugSidebarLog("threads changed count=\(threads.count) sidebarOpen=\(isSidebarOpen) prewarmed=\(isSidebarPrewarmed)")
@@ -348,19 +366,23 @@ struct ContentView: View {
                         isSearchActive: $isSearchActive,
                         showsInlineCloseButton: shouldUseFullWidthSidebar,
                         isVisible: sidebarVisible,
+                        selectedClaudeSessionID: selectedProvider == .claude ? selectedClaudeConversation?.id : nil,
                         onClose: { closeSidebar() },
                         onOpenThread: { thread in
                             openThreadFromSidebar(thread)
                         },
                         onOpenSessions: {
                             closeSidebar()
-                            navigationPath = NavigationPath(["sessions"])
+                            if selectedProvider == .claude { claudeNavigationPath = NavigationPath(["sessions"]) }
+                            else { navigationPath = NavigationPath(["sessions"]) }
                         },
                         onOpenClaudeSession: { session in
                             closeSidebar()
-                            navigationPath = NavigationPath([ClaudeConversationRoute(
+                            selectedClaudeConversation = ClaudeConversationRoute(
                                 server: session.id.server, sessionID: session.id.session, name: session.name
-                            )])
+                            )
+                            claudeNavigationPath = NavigationPath()
+                            selectedProvider = .claude
                         }
                     )
                     .frame(width: currentSidebarWidth)
@@ -395,8 +417,29 @@ struct ContentView: View {
     // MARK: - Layers
 
     private var mainNavigationLayer: some View {
-        NavigationStack(path: $navigationPath) {
-            mainContent
+        // Native tab ownership retains each provider's draft and scroll state,
+        // while the existing sidebar remains the only provider switcher.
+        TabView(selection: $selectedProvider) {
+            providerNavigation(path: $navigationPath) { mainContent }
+                .tag(AgentSessionProvider.codex)
+            providerNavigation(path: $claudeNavigationPath) { claudeMainContent }
+                .tag(AgentSessionProvider.claude)
+        }
+        .onChange(of: isCodexConversationVisible, initial: true) { _, visible in
+            codex.isCodexTimelineVisible = visible
+            if visible { codex.requestImmediateActiveThreadSync(threadId: codex.activeThreadId) }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var isCodexConversationVisible: Bool { selectedProvider == .codex && navigationPath.isEmpty }
+    private var isAtConversationRoot: Bool {
+        selectedProvider == .claude ? claudeNavigationPath.isEmpty : navigationPath.isEmpty
+    }
+
+    private func providerNavigation<Root: View>(path: Binding<NavigationPath>, @ViewBuilder root: () -> Root) -> some View {
+        NavigationStack(path: path) {
+            root()
                 .adaptiveNavigationBar()
                 .navigationDestination(for: String.self) { destination in
                     if destination == "settings" {
@@ -413,16 +456,19 @@ struct ContentView: View {
                         .adaptiveNavigationBar()
                     }
                 }
-                .navigationDestination(for: ClaudeConversationRoute.self) { route in
-                    ClaudeConversationView(server: route.server, sessionID: route.sessionID, initialName: route.name)
-                        .adaptiveNavigationBar()
-                }
         }
-        .onChange(of: navigationPath) { _, path in
-            codex.isCodexTimelineVisible = path.isEmpty
-            if path.isEmpty { codex.requestImmediateActiveThreadSync(threadId: codex.activeThreadId) }
+        .toolbar(.hidden, for: .tabBar)
+    }
+
+    @ViewBuilder
+    private var claudeMainContent: some View {
+        if let route = selectedClaudeConversation {
+            ClaudeConversationView(server: route.server, sessionID: route.sessionID, initialName: route.name)
+                .id(route.id)
+                .toolbar { ToolbarItem(placement: .topBarLeading) { hamburgerButton } }
+        } else {
+            Color.clear
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
@@ -641,7 +687,7 @@ struct ContentView: View {
     private var edgeDragGesture: some Gesture {
         DragGesture(minimumDistance: 15, coordinateSpace: .global)
             .onChanged { value in
-                guard navigationPath.isEmpty else { return }
+                guard isAtConversationRoot else { return }
                 guard !sidebarGestureAutoCommitted else { return }
 
                 if !isSidebarOpen {
@@ -670,7 +716,7 @@ struct ContentView: View {
                 }
             }
             .onEnded { value in
-                guard navigationPath.isEmpty else { return }
+                guard isAtConversationRoot else { return }
                 if sidebarGestureAutoCommitted {
                     sidebarGestureAutoCommitted = false
                     return
@@ -743,6 +789,7 @@ struct ContentView: View {
             closeSidebar()
         }
 
+        selectedProvider = .codex
         selectedThread = thread
         codex.activeThreadId = thread.id
         codex.markThreadAsViewed(thread.id)
@@ -1316,7 +1363,7 @@ struct ContentView: View {
     private func startNewThreadFromMissingNotificationAlert() async {
         do {
             let thread = try await codex.startThread()
-            selectedThread = thread
+            openThreadFromSidebar(thread)
         } catch {
             codex.lastErrorMessage = codex.userFacingTurnErrorMessage(from: error)
         }

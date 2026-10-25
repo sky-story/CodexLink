@@ -7,7 +7,53 @@
 import CryptoKit
 import Foundation
 
+// Only one disk write may run at a time. While it runs, retain just the newest
+// pending snapshot so streaming cannot build an unbounded encode/encrypt backlog.
+final class CodexMessageHistoryWriter: @unchecked Sendable {
+    typealias Snapshot = [String: [CodexMessage]]
+    private let lock = NSLock()
+    private let queue = DispatchQueue(label: "CodexLink.message-history", qos: .utility)
+    private var pending: Snapshot?
+    private var running = false
+    private let write: @Sendable (Snapshot) -> Void
+
+    init(write: @escaping @Sendable (Snapshot) -> Void) { self.write = write }
+
+    func enqueue(_ snapshot: Snapshot) {
+        lock.lock()
+        pending = snapshot
+        if !running {
+            running = true
+            queue.async { self.drain() }
+        }
+        lock.unlock()
+    }
+
+    // Synchronous lifecycle saves and reads share the same ordering as background
+    // saves. In particular an old streaming write cannot undo disconnect cleanup.
+    func withSerialAccess<T>(_ operation: () -> T) -> T {
+        queue.sync(execute: operation)
+    }
+
+    private func drain() {
+        while true {
+            lock.lock()
+            guard let snapshot = pending else {
+                running = false
+                lock.unlock()
+                return
+            }
+            pending = nil
+            lock.unlock()
+            write(snapshot)
+        }
+    }
+}
+
 struct CodexMessagePersistence {
+    private static let writer = CodexMessageHistoryWriter { snapshot in
+        CodexMessagePersistence().writeSnapshot(snapshot)
+    }
     // v6 encrypts the on-device message cache while keeping backward-compatible legacy fallbacks.
     private let fileName = "codex-message-history-v6.bin"
     private let legacyFileNames = [
@@ -20,6 +66,10 @@ struct CodexMessagePersistence {
 
     // Loads the saved message map from disk. Returns an empty store on failure.
     func load() -> [String: [CodexMessage]] {
+        Self.writer.withSerialAccess { loadSnapshot() }
+    }
+
+    private func loadSnapshot() -> [String: [CodexMessage]] {
         let decoder = JSONDecoder()
 
         for fileURL in storeURLs {
@@ -43,6 +93,15 @@ struct CodexMessagePersistence {
 
     // Persists all thread timelines atomically to avoid corrupt partial writes.
     func save(_ value: [String: [CodexMessage]]) {
+        enqueueSave(value)
+        Self.writer.withSerialAccess {}
+    }
+
+    func enqueueSave(_ value: [String: [CodexMessage]]) {
+        Self.writer.enqueue(value)
+    }
+
+    private func writeSnapshot(_ value: [String: [CodexMessage]]) {
         let encoder = JSONEncoder()
         guard let plaintext = try? encoder.encode(sanitizedForPersistence(value)),
               let data = encryptPersistedPayload(plaintext) else {

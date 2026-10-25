@@ -19,7 +19,9 @@ class NotificationStore {
           status TEXT NOT NULL, created_at INTEGER NOT NULL, payload TEXT,
           PRIMARY KEY(provider,id));
         CREATE TABLE IF NOT EXISTS claude_sessions (
-          id TEXT PRIMARY KEY, run TEXT NOT NULL, label TEXT, updated_at INTEGER NOT NULL);`);
+          id TEXT PRIMARY KEY, run TEXT NOT NULL, label TEXT, updated_at INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS claude_task_labels (
+          id TEXT PRIMARY KEY, label TEXT NOT NULL, updated_at INTEGER NOT NULL);`);
       this.migrateLegacy(stateDir);
       this.suppressClaudeBackgroundProgress();
     } catch (error) { this.db.close(); throw error; }
@@ -73,11 +75,27 @@ class NotificationStore {
     this.db.prepare('UPDATE notices SET status=?,payload=NULL WHERE provider=? AND id=?')
       .run(['accepted', 'rejected'].includes(status) ? status : 'unknown', row.provider, row.id);
   }
+  clearClaudeTaskLabels() {
+    this.transaction(() => {
+      this.db.exec('DELETE FROM claude_task_labels');
+      // Also remove task excerpts from unclaimed notices, including those an
+      // already-running older dispatcher may pick up after this opt-out.
+      for (const row of this.db.prepare("SELECT id,payload FROM notices WHERE provider='claude' AND status='pending'").all()) {
+        const payload = JSON.parse(row.payload);
+        if (!payload?.usesClaudeTaskLabel) continue;
+        const { usesClaudeTaskLabel, fallbackBody, ...display } = payload;
+        display.body = fallbackBody || 'Claude 本轮状态已更新，请在 Mac 查看。';
+        this.db.prepare("UPDATE notices SET payload=? WHERE provider='claude' AND id=? AND status='pending'")
+          .run(JSON.stringify(display), row.id);
+      }
+    });
+  }
   prune() {
     const cutoff = this.now() - 7 * 86400000;
     // Never send stale pending notifications after a long outage.
     this.db.prepare('DELETE FROM notices WHERE created_at<?').run(cutoff);
     this.db.prepare('DELETE FROM claude_sessions WHERE updated_at<?').run(cutoff);
+    this.db.prepare('DELETE FROM claude_task_labels WHERE updated_at<?').run(cutoff);
   }
   close() { this.db.close(); }
 }

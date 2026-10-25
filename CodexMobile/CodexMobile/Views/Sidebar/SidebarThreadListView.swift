@@ -27,6 +27,7 @@ struct SidebarThreadListView: View {
     var showsClaudeSection = false
     var claudeSessions: [AgentSessionSummary] = []
     var claudeError: String?
+    var selectedClaudeSessionID: AgentSessionSummary.ID? = nil
     var onSelectClaudeSession: ((AgentSessionSummary) -> Void)? = nil
     var onOpenClaudeSetup: (() -> Void)? = nil
     @Environment(CodexService.self) private var codex
@@ -128,6 +129,9 @@ struct SidebarThreadListView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .background(selectedClaudeSessionID == session.id ? Color(.tertiarySystemFill).opacity(0.8) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 14))
+            .accessibilityAddTraits(selectedClaudeSessionID == session.id ? .isSelected : [])
             .accessibilityIdentifier("sidebar-claude-\(session.id.session)")
         }
     }

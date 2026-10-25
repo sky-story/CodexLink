@@ -20,7 +20,7 @@ final class QRScannerPairingValidatorTests: XCTestCase {
             return XCTFail("Expected a bridge update prompt for mismatched QR versions.")
         }
 
-        XCTAssertEqual(prompt.title, "Update CodexLink on your Mac before scanning")
+        XCTAssertEqual(prompt.title, "Update CodexLink on your computer before scanning")
         XCTAssertEqual(prompt.command, "npm install -g codex-remote@latest")
         XCTAssertTrue(prompt.message.contains("different CodexLink npm version"))
     }
@@ -102,7 +102,7 @@ final class QRScannerPairingValidatorTests: XCTestCase {
             return XCTFail("Expected an expiry error.")
         }
 
-        XCTAssertEqual(message, "This pairing code has expired. Generate a new one from the Mac bridge.")
+        XCTAssertEqual(message, "This pairing code has expired. Generate a new one from the computer bridge.")
     }
 
     private func pairingQRCode(

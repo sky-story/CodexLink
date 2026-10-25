@@ -136,14 +136,17 @@ final class TurnViewModelQueueTests: XCTestCase {
         XCTAssertEqual(viewModel.queuedCount(codex: service, threadID: "thread-queue"), 1)
     }
 
-    func testQueuedDraftsPersistAcrossViewModelRecreationForSameThread() {
+    func testQueuedDraftsPersistAcrossViewModelRecreationForSameThread() async {
         let service = makeService()
         service.isConnected = true
         service.runningThreadIDs.insert("thread-queue")
+        service.activeTurnIdByThread["thread-queue"] = "turn-live"
 
         let firstViewModel = makeViewModel()
         firstViewModel.input = "Message one"
         firstViewModel.sendTurn(codex: service, threadID: "thread-queue")
+
+        await waitForSendCompletion(firstViewModel)
 
         let secondViewModel = makeViewModel()
         XCTAssertEqual(secondViewModel.queuedCount(codex: service, threadID: "thread-queue"), 1)
@@ -256,7 +259,7 @@ final class TurnViewModelQueueTests: XCTestCase {
         viewModel.sendTurn(codex: service, threadID: "thread-queue")
         await waitForSendCompletion(viewModel)
 
-        let message = try XCTUnwrap(service.messagesByThread["thread-queue"]?.last)
+        let message = try XCTUnwrap(service.messagesByThread["thread-queue"]?.last(where: { $0.role == .user }))
         XCTAssertEqual(message.text, "Please inspect @CodexMobile/Views/Turn/TurnView.swift")
         XCTAssertEqual(message.fileMentions, ["CodexMobile/Views/Turn/TurnView.swift"])
     }
@@ -280,7 +283,7 @@ final class TurnViewModelQueueTests: XCTestCase {
         viewModel.sendTurn(codex: service, threadID: "thread-queue")
         await waitForSendCompletion(viewModel)
 
-        let message = try XCTUnwrap(service.messagesByThread["thread-queue"]?.last)
+        let message = try XCTUnwrap(service.messagesByThread["thread-queue"]?.last(where: { $0.role == .user }))
         XCTAssertEqual(message.text, "Please inspect @CodexMobile/Views/Turn/TurnView.swift")
         XCTAssertTrue(message.fileMentions.isEmpty)
     }
@@ -288,7 +291,10 @@ final class TurnViewModelQueueTests: XCTestCase {
     func testFlushQueuePreservesPlanModeFromBusyThreadQueue() async {
         let service = makeService()
         service.isConnected = true
+        service.supportsTurnCollaborationMode = true
+        service.selectedModelId = "gpt-5.3-codex"
         service.runningThreadIDs.insert("thread-queue")
+        service.activeTurnIdByThread["thread-queue"] = "turn-live"
 
         let viewModel = makeViewModel()
         viewModel.isPlanModeArmed = true
@@ -321,7 +327,7 @@ final class TurnViewModelQueueTests: XCTestCase {
         await waitForSendCompletion(viewModel)
 
         XCTAssertEqual(
-            capturedParams?.objectValue?["collaborationMode"]?.stringValue,
+            capturedParams?.objectValue?["collaborationMode"]?.objectValue?["mode"]?.stringValue,
             CodexCollaborationModeKind.plan.rawValue
         )
         XCTAssertEqual(viewModel.queuedCount(codex: service, threadID: "thread-queue"), 0)
@@ -437,7 +443,10 @@ final class TurnViewModelQueueTests: XCTestCase {
     func testSteerQueuedDraftPreservesPlanMode() async {
         let service = makeService()
         service.isConnected = true
+        service.supportsTurnCollaborationMode = true
+        service.selectedModelId = "gpt-5.3-codex"
         service.runningThreadIDs.insert("thread-queue")
+        service.activeTurnIdByThread["thread-queue"] = "turn-live"
         service.activeTurnIdByThread["thread-queue"] = "turn-live"
         service.selectedModelId = "gpt-5.3-codex"
 
@@ -533,7 +542,7 @@ final class TurnViewModelQueueTests: XCTestCase {
 
         XCTAssertEqual(recordedMethods, ["thread/read", "turn/steer"])
         XCTAssertEqual(expectedTurnIDs, ["turn-fallback"])
-        XCTAssertTrue(service.queuedTurnDraftsByThread["thread-queue"]?.isEmpty ?? false)
+        XCTAssertEqual(viewModel.queuedCount(codex: service, threadID: "thread-queue"), 0)
     }
 
     func testSteerQueuedDraftStartsTurnWhenRunningFlagRefreshClearsStaleBusyState() async {
@@ -573,7 +582,7 @@ final class TurnViewModelQueueTests: XCTestCase {
         await waitForSteerCompletion(viewModel)
 
         XCTAssertEqual(recordedMethods, ["thread/read", "turn/start"])
-        XCTAssertTrue(service.queuedTurnDraftsByThread["thread-queue"]?.isEmpty ?? false)
+        XCTAssertEqual(viewModel.queuedCount(codex: service, threadID: "thread-queue"), 0)
         XCTAssertEqual(service.activeTurnID(for: "thread-queue"), "turn-new")
     }
 
@@ -644,7 +653,7 @@ final class TurnViewModelQueueTests: XCTestCase {
         XCTAssertEqual(viewModel.input, "Already editing")
     }
 
-    func testRefreshInFlightTurnStateUsesLatestTurnAndClearsOlderInterruptibleTurn() async {
+    func testRefreshInFlightTurnStateKeepsExplicitRunningTurnBeforeCompletedTail() async {
         let service = makeService()
         service.isConnected = true
         service.isInitialized = true
@@ -662,6 +671,43 @@ final class TurnViewModelQueueTests: XCTestCase {
                             .object([
                                 "id": .string("turn-old"),
                                 "status": .string("in_progress"),
+                            ]),
+                            .object([
+                                "id": .string("turn-latest"),
+                                "status": .string("completed"),
+                            ]),
+                        ])
+                    ])
+                ]),
+                includeJSONRPC: false
+            )
+        }
+
+        let didRefresh = await service.refreshInFlightTurnState(threadId: "thread-queue")
+
+        XCTAssertTrue(didRefresh)
+        XCTAssertTrue(service.runningThreadIDs.contains("thread-queue"))
+        XCTAssertEqual(service.activeTurnIdByThread["thread-queue"], "turn-old")
+    }
+
+    func testRefreshInFlightTurnStateClearsRunningStateWhenEveryTurnIsTerminal() async {
+        let service = makeService()
+        service.isConnected = true
+        service.isInitialized = true
+        service.runningThreadIDs.insert("thread-queue")
+        service.activeTurnIdByThread["thread-queue"] = "turn-old"
+        service.activeTurnId = "turn-old"
+
+        service.requestTransportOverride = { method, _ in
+            XCTAssertEqual(method, "thread/read")
+            return RPCMessage(
+                id: .string(UUID().uuidString),
+                result: .object([
+                    "thread": .object([
+                        "turns": .array([
+                            .object([
+                                "id": .string("turn-old"),
+                                "status": .string("completed"),
                             ]),
                             .object([
                                 "id": .string("turn-latest"),
@@ -757,7 +803,8 @@ final class TurnViewModelQueueTests: XCTestCase {
             )
         }
 
-        XCTAssertEqual(recordedMethods, ["thread/read"])
+        // Recovery reads are bounded; no interrupt may target the completed turn.
+        XCTAssertEqual(recordedMethods, Array(repeating: "thread/read", count: 3))
         XCTAssertFalse(service.runningThreadIDs.contains("thread-queue"))
         XCTAssertTrue(service.protectedRunningFallbackThreadIDs.contains("thread-queue"))
     }
@@ -877,6 +924,7 @@ final class TurnViewModelQueueTests: XCTestCase {
         for _ in 0..<maxPollCount where viewModel.isSending {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
+        XCTAssertFalse(viewModel.isSending, "Send must finish before inspecting its result")
     }
 
     private func waitForSteerCompletion(_ viewModel: TurnViewModel, maxPollCount: Int = 160) async {
@@ -897,6 +945,9 @@ final class TurnViewModelQueueTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
         let service = CodexService(defaults: defaults)
         service.messagesByThread = [:]
+        service.isInitialized = true
+        service.resumedThreadIDs.insert("thread-queue")
+        service.threads = [CodexThread(id: "thread-queue", title: "Queue fixture")]
 
         // CodexService currently crashes while deallocating in unit-test environment.
         // Keep instances alive for process lifetime so assertions remain deterministic.

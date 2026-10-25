@@ -11,6 +11,11 @@ import XCTest
 @MainActor
 final class CodexGPTAccountTests: XCTestCase {
     private static var retainedServices: [CodexService] = []
+    private static var newerBridgeVersion: String {
+        var components = CodexService.minimumSupportedBridgePackageVersion.split(separator: ".").map { Int($0)! }
+        components[components.count - 1] += 1
+        return components.map(String.init).joined(separator: ".")
+    }
 
     func testRefreshGPTAccountStateDecodesSanitizedBridgeStatus() async {
         let service = makeService()
@@ -98,8 +103,8 @@ final class CodexGPTAccountTests: XCTestCase {
                     "loginInFlight": .bool(false),
                     "needsReauth": .bool(false),
                     "tokenReady": .bool(true),
-                    "bridgeVersion": .string("1.3.7"),
-                    "bridgeLatestVersion": .string("1.3.8"),
+                    "bridgeVersion": .string(CodexService.minimumSupportedBridgePackageVersion),
+                    "bridgeLatestVersion": .string(Self.newerBridgeVersion),
                 ]),
                 includeJSONRPC: false
             )
@@ -107,11 +112,11 @@ final class CodexGPTAccountTests: XCTestCase {
 
         await service.refreshBridgeVersionState(allowAvailableBridgeUpdatePrompt: true)
 
-        XCTAssertEqual(service.bridgeInstalledVersion, "1.3.7")
-        XCTAssertEqual(service.latestBridgePackageVersion, "1.3.8")
+        XCTAssertEqual(service.bridgeInstalledVersion, CodexService.minimumSupportedBridgePackageVersion)
+        XCTAssertEqual(service.latestBridgePackageVersion, Self.newerBridgeVersion)
         XCTAssertEqual(
             service.bridgeUpdatePrompt?.title,
-            "A newer CodexLink update is available on your Mac"
+            "A newer CodexLink update is available on your computer"
         )
         XCTAssertEqual(service.bridgeUpdatePrompt?.command, "npm install -g codex-remote@latest")
         XCTAssertEqual(service.gptAccountSnapshot.status, .unknown)
@@ -132,8 +137,8 @@ final class CodexGPTAccountTests: XCTestCase {
                     "loginInFlight": .bool(false),
                     "needsReauth": .bool(false),
                     "tokenReady": .bool(true),
-                    "bridgeVersion": .string("1.3.7"),
-                    "bridgeLatestVersion": .string("1.3.8"),
+                    "bridgeVersion": .string(CodexService.minimumSupportedBridgePackageVersion),
+                    "bridgeLatestVersion": .string(Self.newerBridgeVersion),
                 ]),
                 includeJSONRPC: false
             )
@@ -159,8 +164,8 @@ final class CodexGPTAccountTests: XCTestCase {
                     "loginInFlight": .bool(false),
                     "needsReauth": .bool(false),
                     "tokenReady": .bool(true),
-                    "bridgeVersion": .string("1.3.7"),
-                    "bridgeLatestVersion": .string("1.3.8"),
+                    "bridgeVersion": .string(CodexService.minimumSupportedBridgePackageVersion),
+                    "bridgeLatestVersion": .string(Self.newerBridgeVersion),
                 ]),
                 includeJSONRPC: false
             )
@@ -194,8 +199,8 @@ final class CodexGPTAccountTests: XCTestCase {
                     "loginInFlight": .bool(false),
                     "needsReauth": .bool(false),
                     "tokenReady": .bool(true),
-                    "bridgeVersion": .string("1.3.7"),
-                    "bridgeLatestVersion": .string("1.3.8"),
+                    "bridgeVersion": .string(CodexService.minimumSupportedBridgePackageVersion),
+                    "bridgeLatestVersion": .string(Self.newerBridgeVersion),
                 ]),
                 includeJSONRPC: false
             )
@@ -204,11 +209,11 @@ final class CodexGPTAccountTests: XCTestCase {
         service.setForegroundState(true)
         await yieldMainActor(times: 3)
 
-        XCTAssertEqual(service.bridgeInstalledVersion, "1.3.7")
-        XCTAssertEqual(service.latestBridgePackageVersion, "1.3.8")
+        XCTAssertEqual(service.bridgeInstalledVersion, CodexService.minimumSupportedBridgePackageVersion)
+        XCTAssertEqual(service.latestBridgePackageVersion, Self.newerBridgeVersion)
         XCTAssertEqual(
             service.bridgeUpdatePrompt?.title,
-            "A newer CodexLink update is available on your Mac"
+            "A newer CodexLink update is available on your computer"
         )
     }
 
@@ -246,6 +251,11 @@ final class CodexGPTAccountTests: XCTestCase {
         var capturedOpenParams: IncomingParamsObject?
 
         service.requestTransportOverride = { method, params in
+            if method == "account/status/read" {
+                return RPCMessage(id: .string(UUID().uuidString), result: .object([
+                    "status": .string("loginPending"), "loginInFlight": .bool(true), "tokenReady": .bool(false)
+                ]), includeJSONRPC: false)
+            }
             observedMethods.append(method)
 
             switch method {
@@ -288,6 +298,11 @@ final class CodexGPTAccountTests: XCTestCase {
         var observedMethods: [String] = []
 
         service.requestTransportOverride = { method, params in
+            if method == "account/status/read" {
+                return RPCMessage(id: .string(UUID().uuidString), result: .object([
+                    "status": .string("loginPending"), "loginInFlight": .bool(true), "tokenReady": .bool(false)
+                ]), includeJSONRPC: false)
+            }
             observedMethods.append(method)
 
             switch method {
@@ -595,7 +610,10 @@ final class CodexGPTAccountTests: XCTestCase {
                 durationSeconds: 1
             )
         }) { error in
-            XCTAssertEqual(error.localizedDescription, "Connect to your Mac before using voice transcription.")
+            guard case CodexServiceError.disconnected = error else {
+                return XCTFail("Expected a disconnected error, got \(error)")
+            }
+            XCTAssertEqual(service.classifyVoiceFailure(error), .reconnectRequired)
         }
     }
 
@@ -716,6 +734,9 @@ final class CodexGPTAccountTests: XCTestCase {
         let service = makeService()
         service.isConnected = true
         var accountStatusReadCount = 0
+        var tokenIsReady = false
+        let voiceReadyPoll = expectation(description: "Login polling observes the ready voice token")
+        var fulfilledReadyPoll = false
 
         service.requestTransportOverride = { method, params in
             switch method {
@@ -732,6 +753,10 @@ final class CodexGPTAccountTests: XCTestCase {
             case "account/status/read":
                 XCTAssertNil(params)
                 accountStatusReadCount += 1
+                if tokenIsReady && !fulfilledReadyPoll {
+                    fulfilledReadyPoll = true
+                    voiceReadyPoll.fulfill()
+                }
                 return RPCMessage(
                     id: .string(UUID().uuidString),
                     result: .object([
@@ -741,7 +766,7 @@ final class CodexGPTAccountTests: XCTestCase {
                         "planType": .string("pro"),
                         "loginInFlight": .bool(false),
                         "needsReauth": .bool(false),
-                        "tokenReady": .bool(accountStatusReadCount >= 2),
+                        "tokenReady": .bool(tokenIsReady),
                     ]),
                     includeJSONRPC: false
                 )
@@ -770,7 +795,11 @@ final class CodexGPTAccountTests: XCTestCase {
         XCTAssertFalse(service.gptAccountSnapshot.needsReauth)
         XCTAssertNotNil(service.currentPendingGPTLogin())
 
-        await service.refreshGPTAccountState()
+        let readsBeforeReady = accountStatusReadCount
+        tokenIsReady = true
+        await fulfillment(of: [voiceReadyPoll], timeout: 5)
+        await yieldMainActor(times: 3)
+        XCTAssertGreaterThan(accountStatusReadCount, readsBeforeReady)
 
         XCTAssertEqual(service.gptAccountSnapshot.status, .authenticated)
         XCTAssertEqual(service.gptAccountSnapshot.tokenReady, true)
@@ -781,6 +810,7 @@ final class CodexGPTAccountTests: XCTestCase {
     private func makeService() -> CodexService {
         let service = CodexService(defaults: makeDefaults())
         Self.retainedServices.append(service)
+        addTeardownBlock { @MainActor in service.stopGPTLoginSync() }
         return service
     }
 

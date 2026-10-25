@@ -217,7 +217,9 @@ extension CodexService {
 
             if let localThread = localByID[liveThread.id] {
                 liveThread = mergedThread(liveThread, with: localThread, treatAsServerState: true)
-                liveThread.syncState = localThread.syncState
+                // A transient "not found" placeholder is not a user archive.
+                // Fresh active-server evidence may restore it; explicit archives remain.
+                liveThread.syncState = persistedArchivedIDs.contains(liveThread.id) ? .archivedLocal : .live
             } else if persistedArchivedIDs.contains(liveThread.id) {
                 liveThread.syncState = .archivedLocal
             } else {
@@ -270,7 +272,7 @@ extension CodexService {
             refreshAllThreadTimelineStates()
         }
 
-        if activeThreadId == nil {
+        if activeThreadId == nil, pendingNotificationOpenThreadID == nil {
             activeThreadId = firstLiveThreadID()
         }
 

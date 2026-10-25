@@ -271,7 +271,7 @@ final class CodexStatusTests: XCTestCase {
                 primary: CodexRateLimitWindow(
                     usedPercent: 10,
                     windowDurationMins: 300,
-                    resetsAt: nil
+                    resetsAt: Date(timeIntervalSince1970: 1_742_100_000)
                 ),
                 secondary: nil
             ),
@@ -299,6 +299,9 @@ final class CodexStatusTests: XCTestCase {
         )
 
         XCTAssertEqual(service.rateLimitBuckets.map(\.limitId), ["primary", "secondary"])
+        let primary = service.rateLimitBuckets.first(where: { $0.limitId == "primary" })?.primary
+        XCTAssertEqual(primary?.windowDurationMins, 300)
+        XCTAssertEqual(primary?.resetsAt, Date(timeIntervalSince1970: 1_742_100_000))
         XCTAssertEqual(service.rateLimitBuckets.first(where: { $0.limitId == "primary" })?.primary?.remainingPercent, 45)
         XCTAssertEqual(service.rateLimitBuckets.first(where: { $0.limitId == "secondary" })?.primary?.remainingPercent, 80)
     }

@@ -135,7 +135,7 @@ macOS 首次可能显示“想要控制 iTerm”的自动化授权。需要在 M
 
 Bark 作为通知接收 App 使用其自身的 APNs 能力，CodexLink 不需要新增推送 entitlement。用户已在真机锁屏确认收到测试通知。Mac Bridge 独立监听共享 daemon 的任务完成、失败、中断、等待审批和补充输入事件，手机 App 被挂起时仍可发起通知。提醒打开的是 Bark；审批仍须回到 CodexLink 查看准确内容并操作。
 
-私密配置位于 `~/.codex-remote/bark-config.json`，权限必须为 `600`，格式为 `enabled`、`serverUrl`（HTTPS 服务根地址）、`deviceKey`、可选的 `includeSessionLabel`（默认 false）和 `icons`（按 `codex` / `claude` 保存图片 HTTPS 地址，默认不设置）。不要把真实 Key 放入仓库、URL 日志或公开文档。配置缺失或错误只关闭 Bark，不影响会话控制；无效的可选图片地址只忽略对应图标。停用时把 `enabled` 改为 `false`，再执行 `node scripts/private-service.cjs restart`。
+私密配置位于 `~/.codex-remote/bark-config.json`，权限必须为 `600`，格式为 `enabled`、`serverUrl`（HTTPS 服务根地址）、`deviceKey`、可选的 `includeSessionLabel`、`includeClaudeTaskLabel`（均默认 false）和 `icons`（按 `codex` / `claude` 保存图片 HTTPS 地址，默认不设置）。不要把真实 Key 放入仓库、URL 日志或公开文档。配置缺失或错误只关闭 Bark，不影响会话控制；无效的可选图片地址只忽略对应图标。停用时把 `enabled` 改为 `false`，再执行 `node scripts/private-service.cjs restart`。
 
 ```sh
 node scripts/bark-notifications.cjs --status
@@ -147,9 +147,11 @@ node scripts/bark-notifications.cjs --send-test
 
 开启后标题显示简短状态，如 `Codex · 任务已完成`、`Codex · 等待审批`；正文为 `会话名称 · 8位短标识`，替换原来的通用操作提示，让较长的名称在正文区域显示。优先读取 daemon 的正式会话名称，没有名称时只使用 cwd 的末级目录名，再无信息则显示“未命名会话”。短标识来自完整线程 ID 的 SHA-256 前 8 位，避免 UUIDv7 相邻会话前缀相同；用于区分显示，不是安全标识。Bark group 按短标识稳定分组，重命名不改变分组。同一线程的完成、失败、中断和审批都使用此标识。
 
-名称读取限时 1.5 秒，失败时使用最近的会话元数据或短标识，仍发送通知。不使用 `preview`（通常是首条消息）或任务正文作名称。启用标签时，待发送 outbox 暂存显示文案，领取发送时清除；发送日志不包含会话名称或通知正文。
+Codex 名称读取限时 1.5 秒，失败时使用最近的会话元数据或短标识，仍发送通知。不使用 `preview`（通常是首条消息）或任务正文作 Codex 名称。启用标签时，outbox 暂存显示文案，发送尝试结束后清除；发送日志不包含会话名称或通知正文。
 
-开启后，会话名称或项目目录名、短标识也会随通知发送给 Bark 服务，并可能显示在锁屏；完整路径、原始线程 ID、命令、对话和代码仍不发送。此链路不属于 WebSocket 的端到端加密。当前用户已明确要求区分会话，因此本机启用了此选项；新配置保持默认关闭。
+开启后，会话名称或项目目录名、短标识也会随通知发送给 Bark 服务，并可能显示在锁屏。仅开启会话名称时，不读取命令、对话或代码作为正文，也不发送完整路径或原始线程 ID。此链路不属于 WebSocket 的端到端加密。当前用户已明确要求区分会话，因此本机启用了会话名称；新配置保持默认关闭。
+
+Claude 还可单独开启 `node scripts/bark-notifications.cjs --claude-task-labels on`，使正文先显示本轮任务短标题，再显示会话/项目上下文和短标识。它要求会话名称已启用，默认关闭；**短标题是指令中的有限片段，会发送给 Bark 和显示在锁屏上**，不是模型摘要。“继续”等短回复沿用之前的有效标题；从开启后的下一次有效用户指令开始生效。用 `--claude-task-labels off` 可关闭并清除保存的标题及尚未被领取的通知中的片段。详见 [任务短标题、保留时间和升级说明](claude-notifications.md#用任务短标题区分多个窗口)。
 
 自动提醒范围为 Bridge 观察到的共享 daemon 会话，独立于手机是否停留在该会话。`notification-deliveries.sqlite` 保存本地事件摘要和发送状态，并导入旧版 `bark-deliveries.json`；发送前先落盘，避免重连/服务重启时重复推送。网络结果不确定时不自动重发，可能漏掉个别提醒。Bark 返回成功只代表服务接受请求，真实送达还受通知权限、专注模式、通知摘要和网络影响。
 

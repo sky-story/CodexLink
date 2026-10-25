@@ -9,6 +9,16 @@ import XCTest
 
 @MainActor
 final class TurnFileAutocompleteTokenTests: XCTestCase {
+    func testFilenamePrefixesAreSearchableWithoutRenderingAsConfirmedFileMentions() {
+        for prefix in ["turnv", "TurnView", "app_config", "组件"] {
+            XCTAssertTrue(TurnFileMentionHeuristics.isAllowedAutocompleteQuery(prefix))
+            XCTAssertFalse(TurnFileMentionHeuristics.isAllowedInlineMentionToken(prefix))
+        }
+        for attribute in ["State", "MainActor", "Observable", "ViewBuilder"] {
+            XCTAssertFalse(TurnFileMentionHeuristics.isAllowedAutocompleteQuery(attribute))
+        }
+    }
+
     func testTrailingTokenParsesOnlyWhenItIsFinalToken() {
         let token = TurnViewModel.trailingFileAutocompleteToken(in: "fix @turnv")
         XCTAssertEqual(token?.query, "turnv")

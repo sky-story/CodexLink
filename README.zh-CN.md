@@ -44,6 +44,8 @@
 
 公开验证摘要和已知问题见 [验证记录](docs/validation.md)，发布定位见 [发布准备](docs/release-readiness.md)。
 
+项目维护：[更新日志](CHANGELOG.md) · [开发交接](docs/HANDOFF.md)。
+
 ## 工作方式
 
 ```text
@@ -280,6 +282,8 @@ Mac 关机、睡眠或断网时无法实时控制。launchd 后台运行并不�
 更多网络、签名和 APNs 细节见 [配置说明](docs/setup.md)。
 
 ## 开发与验证
+
+当前状态和完整单测命令见 [开发交接](docs/HANDOFF.md)。下面的无签名命令只检查编译；涉及 Keychain 的单元测试需要正常模拟器签名。
 
 ```sh
 npm --prefix codex-remote-bridge test

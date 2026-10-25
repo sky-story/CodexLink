@@ -17,17 +17,28 @@ const { resolveCodexRemoteStateDir } = require('../codex-remote-bridge/src/daemo
     try { fs.writeFileSync(path.join(stateDir, 'bark-config.json'), JSON.stringify({ enabled: true, serverUrl: url.origin, deviceKey }, null, 2), { mode: 0o600, flag: 'wx' }); }
     catch { throw new Error('未创建配置：文件已存在或无法写入，请先检查本地配置。'); }
     console.log('Bark 配置已私密保存；需通过项目管理脚本更新服务。');
-  } else if (operation === '--session-labels') {
+  } else if (['--session-labels', '--claude-task-labels'].includes(operation)) {
     const choice = process.argv[3];
     if (!['on', 'off'].includes(choice)) throw new Error('Expected on or off');
     const file = path.join(stateDir, 'bark-config.json');
     if (!loadBarkConfig({ stateDir }).enabled) throw new Error('Configure Bark first');
-    const config = JSON.parse(fs.readFileSync(file, 'utf8'));
-    config.includeSessionLabel = choice === 'on';
+    const before = fs.readFileSync(file, 'utf8');
+    const config = JSON.parse(before);
+    const key = operation === '--claude-task-labels' ? 'includeClaudeTaskLabel' : 'includeSessionLabel';
+    if (key === 'includeClaudeTaskLabel' && choice === 'on' && !config.includeSessionLabel) throw new Error('Enable session labels first');
+    config[key] = choice === 'on';
     const temporary = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(temporary, JSON.stringify(config, null, 2), { mode: 0o600 });
-    fs.renameSync(temporary, file);
-    console.log(JSON.stringify({ includeSessionLabel: config.includeSessionLabel, restartRequired: true }));
+    try {
+      fs.writeFileSync(temporary, JSON.stringify(config, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
+      if (fs.readFileSync(file, 'utf8') !== before) throw new Error('Configuration changed');
+      fs.renameSync(temporary, file);
+    } finally { fs.rmSync(temporary, { force: true }); }
+    if (choice === 'off' && fs.existsSync(path.join(stateDir, 'notification-deliveries.sqlite'))) {
+      const { NotificationStore } = require('../codex-remote-bridge/src/notification-store');
+      const store = new NotificationStore(stateDir);
+      try { store.clearClaudeTaskLabels(); } finally { store.close(); }
+    }
+    console.log(JSON.stringify({ [key]: config[key], restartRequired: key === 'includeSessionLabel' }));
   } else if (operation === '--icon') {
     const [provider, choice] = process.argv.slice(3);
     if (!['codex', 'claude'].includes(provider) || !choice || process.argv.length !== 5) throw new Error('Expected provider and icon');
@@ -60,6 +71,7 @@ const { resolveCodexRemoteStateDir } = require('../codex-remote-bridge/src/daemo
   } else if (operation === '--status') {
     const config = loadBarkConfig({ stateDir });
     console.log(JSON.stringify({ enabled: config.enabled, reason: config.reason, includeSessionLabel: config.includeSessionLabel === true,
+      includeClaudeTaskLabel: config.includeClaudeTaskLabel === true,
       icons: { codex: Boolean(config.icons?.codex), claude: Boolean(config.icons?.claude) } }));
-  } else throw new Error('Usage: bark-notifications.cjs --status | --configure-stdin | --session-labels on|off | --icon codex|claude default|off|HTTPS_URL | --send-test [codex|claude]');
+  } else throw new Error('Usage: bark-notifications.cjs --status | --configure-stdin | --session-labels on|off | --claude-task-labels on|off | --icon codex|claude default|off|HTTPS_URL | --send-test [codex|claude]');
 })().catch(() => { console.error('Bark 操作未完成，请检查配置、参数或网络。未输出任何私密地址。'); process.exitCode = 1; });

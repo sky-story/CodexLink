@@ -1,5 +1,5 @@
 #if DEBUG && targetEnvironment(simulator)
-import Foundation
+import SwiftUI
 
 // An unpaired simulator fixture for drawer/scroll regressions with long CJK Markdown.
 // Every RPC is intercepted; this scene cannot send a task to a real agent.
@@ -15,11 +15,11 @@ func configureSidebarPerformancePreview(_ service: CodexService) {
     service.relayMacDeviceId = "sidebar-preview-mac"
     service.lastNegotiatedSharedSession = true
     service.syncRealtimeEnabled = false
-    service.threads = (0..<70).map { index in
-        CodexThread(id: index == 0 ? threadID : "sidebar-project-\(index)",
-                    title: index == 0 ? "长中文消息示例" : "示例会话 \(index)",
-                    updatedAt: Date(timeIntervalSince1970: 1_700_000_000 - Double(index)),
-                    cwd: "/demo/project-\(index % 8)")
+    service.threads = (0..<70).map { (index: Int) -> CodexThread in
+        let id = index == 0 ? threadID : "sidebar-project-\(index)"
+        let title = index == 0 ? "长中文消息示例" : "示例会话 \(index)"
+        let updated = Date(timeIntervalSince1970: 1_700_000_000 - Double(index))
+        return CodexThread(id: id, title: title, updatedAt: updated, cwd: "/demo/project-\(index % 8)")
     }
     let paragraph = "这是一段用于验证界面性能的虚构中文内容。侧边栏打开和关闭时，屏幕外的历史消息不应反复参与排版。消息仍需保留粗体、列表、代码和链接，滚动后可以继续阅读历史内容。"
     let messages = (0..<60).map { (index: Int) in
@@ -62,7 +62,7 @@ func configureSidebarPerformancePreview(_ service: CodexService) {
     let claude = ClaudeSession(id: "sidebar-claude", generation: "g", name: "检查购物车流程", project: "storefront", phase: "approval", online: true, verified: true, updatedAt: 1_700_000_000_000, cwd: "/demo/storefront")
     let permission = ClaudePermission(id: "sidebar-approval", tool: "Bash", description: "运行购物车测试", preview: "npm test -- cart", status: "pending", expiresAt: Date().addingTimeInterval(600).timeIntervalSince1970 * 1000)
     func json<T: Encodable>(_ value: T) throws -> JSONValue { try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(value)) }
-    service.requestTransportOverride = { method, _ in
+    service.requestTransportOverride = { method, params in
         let result: JSONValue
         switch method {
         case "claude/sessions": result = .object(["data": .array([try json(claude)])])
@@ -70,11 +70,33 @@ func configureSidebarPerformancePreview(_ service: CodexService) {
             result = try json(ClaudeSnapshot(session: claude, messages: [ClaudeChatMessage(id: "r", seq: 1, role: "assistant", text: "购物车逻辑已检查，请确认运行相关测试。", source: "channel", createdAt: claude.updatedAt)], permissions: [permission], receipts: [], nextBefore: nil))
         case "thread/read", "thread/resume": result = .object(["thread": threadJSON])
         case "remote/sync": result = .object(["approvals": .array([])])
+        case "remote/control":
+            try await Task.sleep(for: .seconds(6))
+            result = .object([
+                "commandId": params?.objectValue?["commandId"] ?? .null,
+                "threadId": params?.objectValue?["threadId"] ?? .null,
+                "action": params?.objectValue?["action"] ?? .null,
+                "status": .string("queued")
+            ])
         case "thread/list":
             result = .object(["data": threadList, "nextCursor": .null])
         default: result = .object(["data": .array([])])
         }
         return RPCMessage(id: .string("sidebar-fixture"), result: result)
+    }
+}
+
+struct SidebarAuditPreview: View {
+    @Environment(CodexService.self) private var service
+
+    var body: some View {
+        ContentView()
+            .safeAreaInset(edge: .top) {
+                Button("模拟 Codex 通知") {
+                    service.handleNotificationOpen(threadId: "sidebar-demo", turnId: nil)
+                }
+                .buttonStyle(.bordered)
+            }
     }
 }
 #endif

@@ -605,6 +605,11 @@ extension CodexService {
         latestTurnTerminalStateByThread[threadId] = state
         if let turnId {
             terminalStateByTurnID[turnId] = state
+            if state == .stopped {
+                stoppedTurnIDsByThread[threadId, default: []].insert(turnId)
+            } else {
+                stoppedTurnIDsByThread[threadId]?.remove(turnId)
+            }
         }
         refreshThreadTimelineState(for: threadId)
         triggerRunCompletionHapticIfNeeded(
@@ -1179,7 +1184,9 @@ extension CodexService {
         guard let messageIndex = findLatestPlanMessageIndex(
             threadId: threadId,
             turnId: turnId,
-            itemId: itemId,
+            // A newly created synthetic row has no structured plan metadata yet.
+            // Find it by the identity just inserted, before requiring .progress.
+            itemId: itemId ?? turnId.map { syntheticStreamingItemId(turnId: $0, kind: .plan) },
             planPresentation: planPresentation
         ) else {
             return
@@ -1888,9 +1895,7 @@ extension CodexService {
     }
 
     private func normalizedFileChangePathKeys(from text: String) -> Set<String> {
-        let inlineTotalsRegex = try? NSRegularExpression(
-            pattern: #"\s*[+\u{FF0B}]\s*\d+\s*[-\u{2212}\u{2013}\u{2014}\u{FE63}\u{FF0D}]\s*\d+\s*$"#
-        )
+        let inlineTotalsRegex = TurnMessageRegexCache.trailingInlineTotals
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var keys: Set<String> = []
 
@@ -2971,7 +2976,6 @@ extension CodexService {
                     let belongsToTurn = belongsToCompletedTurn(threadMessages[index])
                         || fallbackPlanIndex == index
                     guard belongsToTurn,
-                          threadMessages[index].resolvedPlanPresentation == .progress,
                           let planState = threadMessages[index].planState,
                           !planState.steps.isEmpty,
                           planState.steps.contains(where: { $0.status != .completed }) else {
@@ -3088,9 +3092,7 @@ extension CodexService {
             let snapshot = self.messagesByThread
             self.messagePersistenceDebounceTask = nil
 
-            Task.detached { [messagePersistence] in
-                messagePersistence.save(snapshot)
-            }
+            self.messagePersistence.enqueueSave(snapshot)
         }
     }
 }
@@ -3401,10 +3403,11 @@ extension CodexService {
 
     // Keeps stopped-turn lookup thread-local so scroll/render code never rescans full transcripts.
     func rebuildStoppedTurnIDs(for threadId: String, messages: [CodexMessage]) -> Set<String> {
+        // An interrupted turn may not have emitted a message yet. Preserve its recorded outcome.
         let stoppedTurnIDs = Set(
             messages.compactMap(\.turnId)
                 .filter { terminalStateByTurnID[$0] == .stopped }
-        )
+        ).union((stoppedTurnIDsByThread[threadId] ?? []).filter { terminalStateByTurnID[$0] == .stopped })
         stoppedTurnIDsByThread[threadId] = stoppedTurnIDs
         return stoppedTurnIDs
     }

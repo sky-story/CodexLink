@@ -135,12 +135,13 @@ struct SharedSessionComposer: View {
     }
 
     private func send(_ action: String) {
+        let submittedText = text
         sending = true; error = nil
         Task { @MainActor in
             defer { sending = false }
             do {
-                try await codex.sharedControl(threadID: threadID, action: action, text: text)
-                if action != "interrupt" { text = "" }
+                try await codex.sharedControl(threadID: threadID, action: action, text: submittedText)
+                if action != "interrupt", text == submittedText { text = "" }
             } catch { self.error = error.localizedDescription }
         }
     }

@@ -143,7 +143,7 @@ final class CodexServiceIncomingCommandExecutionTests: XCTestCase {
         XCTAssertFalse(runRows[0].isStreaming)
     }
 
-    func testToolCallDeltaAddsDedicatedToolActivityRows() {
+    func testToolCallDeltaAddsDedicatedToolActivityRows() throws {
         let service = makeService()
         let threadID = "thread-\(UUID().uuidString)"
         let turnID = "turn-\(UUID().uuidString)"
@@ -157,11 +157,13 @@ final class CodexServiceIncomingCommandExecutionTests: XCTestCase {
             ])
         )
 
+        service.flushAllPendingStreamingDeltas()
+
         let toolRows = service.messages(for: threadID).filter {
             $0.role == .system && $0.kind == .toolActivity
         }
         XCTAssertEqual(toolRows.count, 1)
-        let body = toolRows[0].text
+        let body = try XCTUnwrap(toolRows.first).text
         XCTAssertTrue(body.contains("Read CodexProtocol.swift"))
         XCTAssertTrue(body.contains("Search extractSystemTitleAndBody"))
         XCTAssertFalse(body.contains("ignore"))
@@ -1242,6 +1244,7 @@ final class CodexServiceIncomingCommandExecutionTests: XCTestCase {
         let assistantRows = merged.filter { $0.role == .assistant }
 
         XCTAssertEqual(assistantRows.count, 1)
+        XCTAssertEqual(assistantRows.first?.id, existing.first?.id)
         XCTAssertEqual(assistantRows[0].turnId, turnID)
         XCTAssertEqual(assistantRows[0].itemId, "server-message")
         XCTAssertEqual(assistantRows[0].text, "Testo finale")

@@ -991,11 +991,11 @@ extension CodexService {
         if isOversizedRelayPayloadError(error) {
             return oversizedRelayPayloadMessage
         }
-        if shouldTreatSendFailureAsDisconnect(error) || isBenignBackgroundDisconnect(error) {
-            return "Connection was interrupted. Tap Reconnect to try again."
-        }
         if isRecoverableTransientConnectionError(error) {
             return "Connection timed out. Check server/network."
+        }
+        if shouldTreatSendFailureAsDisconnect(error) || isBenignBackgroundDisconnect(error) {
+            return "Connection was interrupted. Tap Reconnect to try again."
         }
         return error.localizedDescription
     }

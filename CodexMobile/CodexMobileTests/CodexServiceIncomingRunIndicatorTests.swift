@@ -332,6 +332,7 @@ final class CodexServiceIncomingRunIndicatorTests: XCTestCase {
         sendTurnStarted(service: service, threadID: threadID, turnID: turnID)
         sendTurnCompletedStopped(service: service, threadID: threadID, turnID: turnID)
 
+        XCTAssertTrue(service.stoppedTurnIDs(for: "unrelated-thread").isEmpty)
         XCTAssertEqual(service.stoppedTurnIDs(for: threadID), Set([turnID]))
         XCTAssertEqual(service.timelineState(for: threadID).renderSnapshot.stoppedTurnIDs, Set([turnID]))
     }
@@ -604,7 +605,7 @@ final class CodexServiceIncomingRunIndicatorTests: XCTestCase {
             XCTAssertNil(service.relayUrl)
             XCTAssertEqual(
                 service.lastErrorMessage,
-                "This relay session was replaced by another Mac connection. Scan a new QR code to reconnect."
+                "This relay session was replaced by another computer connection. Scan a new QR code to reconnect."
             )
         }
     }
@@ -632,7 +633,7 @@ final class CodexServiceIncomingRunIndicatorTests: XCTestCase {
             XCTAssertEqual(service.relayUrl, SecureStore.readString(for: CodexSecureKeys.relayUrl))
             XCTAssertEqual(
                 service.lastErrorMessage,
-                "The saved Mac session is temporarily unavailable. CodexLink will keep retrying. If you restarted the bridge on your Mac, scan the new QR code."
+                "Trying to reach your saved computer. CodexLink will keep retrying. If you restarted the bridge on that computer, scan the new QR code."
             )
             XCTAssertEqual(service.connectionRecoveryState, .retrying(attempt: 0, message: "Reconnecting..."))
         }
@@ -678,7 +679,7 @@ final class CodexServiceIncomingRunIndicatorTests: XCTestCase {
             XCTAssertEqual(service.relayUrl, SecureStore.readString(for: CodexSecureKeys.relayUrl))
             XCTAssertEqual(
                 service.lastErrorMessage,
-                "The Mac was temporarily unavailable and this message could not be delivered. Wait a moment, then try again."
+                "The paired computer was temporarily unavailable and this message could not be delivered. Wait a moment, then try again."
             )
         }
     }
@@ -1136,7 +1137,63 @@ final class CodexServiceIncomingRunIndicatorTests: XCTestCase {
         XCTAssertFalse(planMessages[0].shouldDisplayPinnedPlanAccessory)
     }
 
-    func testLegacyAgentDeltaParsesTopLevelTurnIdAndMessageId() {
+    func testStoppedTurnDoesNotMarkIncompletePlanStepsAsCompleted() {
+        let service = makeService()
+        let threadID = "thread-\(UUID().uuidString)"
+        let turnID = "turn-\(UUID().uuidString)"
+        let itemID = "item-\(UUID().uuidString)"
+
+        service.handleNotification(
+            method: "turn/plan/updated",
+            params: .object([
+                "threadId": .string(threadID),
+                "turnId": .string(turnID),
+                "explanation": .string("Finish the work in safe slices."),
+                "plan": .array([
+                    .object([
+                        "step": .string("Inspect"),
+                        "status": .string("completed"),
+                    ]),
+                    .object([
+                        "step": .string("Implement"),
+                        "status": .string("in_progress"),
+                    ]),
+                    .object([
+                        "step": .string("Verify"),
+                        "status": .string("pending"),
+                    ]),
+                ]),
+            ])
+        )
+
+        service.handleNotification(
+            method: "item/completed",
+            params: .object([
+                "threadId": .string(threadID),
+                "turnId": .string(turnID),
+                "item": .object([
+                    "id": .string(itemID),
+                    "type": .string("plan"),
+                    "content": .array([
+                        .object([
+                            "type": .string("text"),
+                            "text": .string("1. Inspect\n2. Implement\n3. Verify"),
+                        ]),
+                    ]),
+                ]),
+            ])
+        )
+
+        sendTurnCompletedStopped(service: service, threadID: threadID, turnID: turnID)
+
+        let planMessages = service.messages(for: threadID).filter { $0.kind == .plan }
+        XCTAssertEqual(planMessages.count, 1)
+        XCTAssertFalse(planMessages[0].isStreaming)
+        XCTAssertEqual(planMessages[0].planState?.steps.map(\.status), [.completed, .inProgress, .pending])
+        XCTAssertFalse(planMessages[0].shouldDisplayPinnedPlanAccessory)
+    }
+
+    func testLegacyAgentDeltaParsesTopLevelTurnIdAndMessageId() throws {
         let service = makeService()
         let threadID = "thread-\(UUID().uuidString)"
         let turnID = "turn-\(UUID().uuidString)"
@@ -1167,8 +1224,11 @@ final class CodexServiceIncomingRunIndicatorTests: XCTestCase {
             ])
         )
 
+        service.flushAllPendingStreamingDeltas()
+
         let assistantMessages = service.messages(for: threadID).filter { $0.role == .assistant }
         XCTAssertEqual(assistantMessages.count, 2)
+        guard assistantMessages.count == 2 else { return }
         XCTAssertEqual(assistantMessages[0].turnId, turnID)
         XCTAssertEqual(assistantMessages[0].itemId, "message-1")
         XCTAssertEqual(assistantMessages[0].text, "Primo blocco")

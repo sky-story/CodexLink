@@ -35,6 +35,102 @@ final class ClaudeChannelTests: XCTestCase {
         return RPCMessage(id: .integer(1), result: try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(snapshot)))
     }
 
+    func testStalledCommandConfirmationReleasesComposerAndRetainsUncertainty() async throws {
+        let service = service()
+        let model = ClaudeConversationModel(server: service.sessionOverviewServerKey, sessionID: session.id)
+        let initial = try snapshotResponse()
+        service.requestTransportOverride = { _, _ in initial }
+        await model.refresh(using: service)
+        service.commandConfirmationTimeout = .milliseconds(40)
+        model.draft = "send only once"
+        let started = expectation(description: "send started")
+        let finished = expectation(description: "send confirmation timed out")
+        var release: CheckedContinuation<RPCMessage, Never>?
+        var id = ""
+        var methods: [String] = []
+        service.requestTransportOverride = { method, params in
+            methods.append(method)
+            id = params?.objectValue?["commandId"]?.stringValue ?? ""
+            return await withCheckedContinuation { release = $0; started.fulfill() }
+        }
+        let send = Task { await model.send(using: service); finished.fulfill() }
+        await fulfillment(of: [started, finished], timeout: 2)
+        XCTAssertFalse(model.sending)
+        XCTAssertEqual(model.draft, "send only once")
+        XCTAssertEqual(model.unconfirmed.count, 1)
+        XCTAssertFalse(model.canSend(service))
+        XCTAssertTrue(service.pendingRequests.isEmpty)
+        release?.resume(returning: RPCMessage(id: .integer(1), result: receipt(id: id)))
+        await send.value
+        for _ in 0..<3 { await Task.yield() }
+        XCTAssertEqual(service.pendingClaudeOperations(sessionID: session.id).count, 1)
+        service.requestTransportOverride = { method, _ in
+            methods.append(method)
+            return RPCMessage(id: .integer(1), result: .object(["receipt": self.receipt(id: id)]))
+        }
+        await service.recoverClaudeOperations(sessionID: session.id, server: service.sessionOverviewServerKey)
+        XCTAssertTrue(service.pendingClaudeOperations(sessionID: session.id).isEmpty)
+        XCTAssertEqual(methods, ["claude/send", "claude/receipt"])
+    }
+
+    func testStalledPermissionConfirmationDoesNotRepeatDecision() async throws {
+        let service = service()
+        service.commandConfirmationTimeout = .milliseconds(40)
+        let permission = ClaudePermission(id: "approval", tool: "Bash", description: "Fixture", preview: "true", status: "pending", expiresAt: Date().addingTimeInterval(60).timeIntervalSince1970 * 1000)
+        let finished = expectation(description: "permission wait ended")
+        var release: CheckedContinuation<RPCMessage, Never>?
+        var methods: [String] = []
+        service.requestTransportOverride = { method, _ in
+            methods.append(method)
+            return await withCheckedContinuation { release = $0 }
+        }
+        let send = Task {
+            do { _ = try await service.sendClaudeCommand(session: session, server: service.sessionOverviewServerKey, permission: permission, behavior: "deny"); XCTFail() } catch {}
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: 2)
+        let pending = try XCTUnwrap(service.pendingClaudeOperations(sessionID: session.id).first)
+        XCTAssertEqual(pending.action, "permission")
+        XCTAssertEqual(methods, ["claude/permission"])
+        release?.resume(returning: RPCMessage(id: .integer(1), result: receipt(id: pending.id, action: "permission")))
+        await send.value
+        XCTAssertEqual(service.pendingClaudeOperations(sessionID: session.id).count, 1)
+    }
+
+    func testUnknownOrMismatchedActionReceiptDoesNotClearTracking() async throws {
+        for mismatch in [false, true] {
+            let service = service()
+            var id = ""
+            service.requestTransportOverride = { _, params in
+                id = params?.objectValue?["commandId"]?.stringValue ?? ""
+                return RPCMessage(id: .integer(1), result: self.receipt(id: id, action: mismatch ? "permission" : "message", status: mismatch ? "sent" : "unknown"))
+            }
+            do { _ = try await service.sendClaudeCommand(session: session, server: service.sessionOverviewServerKey, text: "once"); XCTFail() } catch {}
+            XCTAssertEqual(service.pendingClaudeOperations(sessionID: session.id).count, 1)
+            service.requestTransportOverride = { _, _ in
+                RPCMessage(id: .integer(1), result: .object(["receipt": self.receipt(id: id, action: mismatch ? "permission" : "message", status: mismatch ? "sent" : "unknown")]))
+            }
+            await service.recoverClaudeOperations(sessionID: session.id, server: service.sessionOverviewServerKey)
+            XCTAssertEqual(service.pendingClaudeOperations(sessionID: session.id).count, 1)
+        }
+    }
+
+    func testDefinitivelyFailedClaudeSendKeepsDraftAndReleasesUncertainty() async throws {
+        let service = service()
+        let model = ClaudeConversationModel(server: service.sessionOverviewServerKey, sessionID: session.id)
+        let initial = try snapshotResponse()
+        service.requestTransportOverride = { _, _ in initial }
+        await model.refresh(using: service)
+        model.draft = "keep this draft"
+        service.requestTransportOverride = { _, params in
+            RPCMessage(id: .integer(1), result: self.receipt(id: params?.objectValue?["commandId"]?.stringValue ?? "", status: "failed"))
+        }
+        await model.send(using: service)
+        XCTAssertEqual(model.draft, "keep this draft")
+        XCTAssertTrue(model.unconfirmed.isEmpty)
+        XCTAssertTrue(model.errorMessage?.contains("未执行") == true)
+    }
+
     func testLegacyPendingOperationsMigrateOnlyKnownRelayOwners() throws {
         let defaults = UserDefaults(suiteName: "ClaudeChannelTests.\(UUID().uuidString)")!
         let service = service(defaults: defaults)
@@ -201,6 +297,109 @@ final class ClaudeChannelTests: XCTestCase {
         await first.value
         XCTAssertEqual(model.messages.map(\.seq), [3, 4])
         XCTAssertFalse(model.loading)
+    }
+
+    func testStalledConversationReadTimesOutAndLateReplyCannotReplaceRetry() async throws {
+        let service = service()
+        let model = ClaudeConversationModel(server: service.sessionOverviewServerKey, sessionID: session.id)
+        let started = expectation(description: "read started")
+        let finished = expectation(description: "stalled read has a deadline")
+        var release: CheckedContinuation<RPCMessage, Never>?
+        service.requestTransportOverride = { _, _ in
+            await withCheckedContinuation { release = $0; started.fulfill() }
+        }
+        let first = Task { await model.refresh(using: service); finished.fulfill() }
+        await fulfillment(of: [started], timeout: 2)
+        await fulfillment(of: [finished], timeout: 15)
+        XCTAssertFalse(model.loading, "A lost response must release the refresh lock")
+        XCTAssertNotNil(model.errorMessage)
+        XCTAssertTrue(service.pendingRequests.isEmpty, "Timed-out requests must release their wire continuations")
+        let latest = try snapshotResponse(sequences: [3, 4])
+        service.requestTransportOverride = { _, _ in latest }
+        await model.refresh(using: service)
+        XCTAssertEqual(model.messages.map(\.seq), [3, 4])
+        release?.resume(returning: try snapshotResponse())
+        await first.value
+        for _ in 0..<3 { await Task.yield() }
+        XCTAssertEqual(model.messages.map(\.seq), [3, 4], "A late response must not replace the successful retry")
+    }
+
+    func testUnverifiedChannelDoesNotDescribeMacHistoryAsWaitingForAReply() async throws {
+        let service = service()
+        let model = ClaudeConversationModel(server: service.sessionOverviewServerKey, sessionID: session.id)
+        let response = try snapshotResponse()
+        service.requestTransportOverride = { _, _ in response }
+        await model.refresh(using: service)
+        XCTAssertEqual(model.messages.count, 2)
+        XCTAssertEqual(model.snapshot?.session.statusLabel, "已连接")
+        XCTAssertFalse(model.snapshot!.session.verified, "Reading Mac history does not verify phone delivery")
+    }
+
+    func testCancellingTimedReadReleasesWireContinuationBeforeLateResponse() async throws {
+        let service = service()
+        let started = expectation(description: "transport suspended")
+        var release: CheckedContinuation<RPCMessage, Never>?
+        service.requestTransportOverride = { _, _ in
+            await withCheckedContinuation { release = $0; started.fulfill() }
+        }
+        let read = Task { try await service.sendRequest(method: "claude/snapshot", params: nil, timeout: .seconds(12)) }
+        await fulfillment(of: [started], timeout: 2)
+        XCTAssertEqual(service.pendingRequests.count, 1)
+        read.cancel()
+        do { _ = try await read.value; XCTFail("Cancelled read must finish promptly") }
+        catch is CancellationError {} catch { XCTFail("Unexpected cancellation error: \(error)") }
+        XCTAssertTrue(service.pendingRequests.isEmpty)
+        release?.resume(returning: try snapshotResponse())
+        for _ in 0..<3 { await Task.yield() }
+        XCTAssertTrue(service.pendingRequests.isEmpty)
+    }
+
+    func testHistoryRefreshFailurePreservesAlreadyLoadedMessages() async throws {
+        let service = service()
+        let model = ClaudeConversationModel(server: service.sessionOverviewServerKey, sessionID: session.id)
+        let response = try snapshotResponse()
+        service.requestTransportOverride = { _, _ in response }
+        await model.refresh(using: service)
+        service.requestTransportOverride = { _, _ in throw CodexServiceError.invalidResponse("fixture read unavailable") }
+        await model.refresh(using: service)
+        XCTAssertEqual(model.messages.map(\.seq), [1, 2])
+        XCTAssertNotNil(model.errorMessage)
+        XCTAssertFalse(model.loading)
+        service.requestTransportOverride = { _, _ in response }
+        await model.refresh(using: service)
+        XCTAssertNil(model.errorMessage)
+        XCTAssertEqual(model.messages.map(\.seq), [1, 2])
+    }
+
+    func testHistoryRemainsVisibleWhileReceiptRecoveryIsStalled() async throws {
+        let defaults = UserDefaults(suiteName: "ClaudeChannelTests.\(UUID().uuidString)")!
+        let service = service(defaults: defaults)
+        let server = service.sessionOverviewServerKey
+        let pending = ClaudePendingOperation(id: "uncertain-command", sessionId: session.id, server: server, action: "message")
+        defaults.set(try JSONEncoder().encode([pending]), forKey: "claude-channel-pending-v1")
+        let model = ClaudeConversationModel(server: server, sessionID: session.id)
+        let snapshot = try snapshotResponse()
+        let started = expectation(description: "receipt read suspended")
+        var release: CheckedContinuation<RPCMessage, Never>?
+        var methods: [String] = []
+        service.requestTransportOverride = { method, _ in
+            methods.append(method)
+            if method == "claude/snapshot" { return snapshot }
+            return await withCheckedContinuation { release = $0; started.fulfill() }
+        }
+        let refresh = Task { await model.refresh(using: service) }
+        await fulfillment(of: [started], timeout: 2)
+        XCTAssertEqual(model.messages.map(\.seq), [1, 2], "History must be visible before an uncertain command's receipt arrives")
+        XCTAssertEqual(model.unconfirmed, [pending])
+        XCTAssertFalse(model.canSend(service))
+        refresh.cancel()
+        await refresh.value
+        XCTAssertFalse(model.loading)
+        XCTAssertTrue(service.pendingRequests.isEmpty)
+        release?.resume(returning: RPCMessage(id: .integer(1), result: .object(["receipt": receipt(id: pending.id)])))
+        for _ in 0..<3 { await Task.yield() }
+        XCTAssertEqual(service.pendingClaudeOperations(sessionID: session.id), [pending])
+        XCTAssertEqual(methods, ["claude/snapshot", "claude/receipt"], "Read recovery must never replay a send")
     }
 
     func testConversationUncertainSendRetainsDraftAndNeverReplaysAfterReconnect() async throws {

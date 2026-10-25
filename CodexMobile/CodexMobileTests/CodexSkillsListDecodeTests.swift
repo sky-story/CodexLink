@@ -69,7 +69,7 @@ final class CodexSkillsListDecodeTests: XCTestCase {
         XCTAssertTrue(requestedSourceKinds.contains("vscode"))
     }
 
-    func testListThreadsDefaultsToRecentProjectFocusedLimit() async throws {
+    func testListThreadsUsesSeparateActiveAndArchivedPageLimits() async throws {
         let service = makeService()
         var capturedParams: [RPCObject] = []
 
@@ -90,9 +90,9 @@ final class CodexSkillsListDecodeTests: XCTestCase {
         try await service.listThreads()
 
         XCTAssertEqual(capturedParams.count, 2)
-        XCTAssertEqual(capturedParams[0]["limit"]?.intValue, 12)
+        XCTAssertEqual(capturedParams[0]["limit"]?.intValue, 70)
         XCTAssertNil(capturedParams[0]["archived"]?.boolValue)
-        XCTAssertEqual(capturedParams[1]["limit"]?.intValue, 12)
+        XCTAssertEqual(capturedParams[1]["limit"]?.intValue, 10)
         XCTAssertEqual(capturedParams[1]["archived"]?.boolValue, true)
     }
 

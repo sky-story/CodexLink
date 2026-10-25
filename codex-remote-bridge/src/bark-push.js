@@ -1,6 +1,7 @@
-// Optional Bark notifications. Opt-in session labels never include message previews.
+// Optional Bark notifications. Session names and Claude task excerpts have separate opt-ins.
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const { createHash } = require('node:crypto');
 const { resolveCodexRemoteStateDir } = require('./daemon-state');
 const { NotificationStore } = require('./notification-store');
@@ -70,7 +71,8 @@ function loadBarkConfig({ stateDir = resolveCodexRemoteStateDir() } = {}) {
       if (icon) icons[provider] = icon;
     }
     return { enabled: true, reason: 'configured', endpoint: `${url.origin}/push`, deviceKey: config.deviceKey,
-      includeSessionLabel: config.includeSessionLabel === true, icons };
+      includeSessionLabel: config.includeSessionLabel === true,
+      includeClaudeTaskLabel: config.includeSessionLabel === true && config.includeClaudeTaskLabel === true, icons };
   } catch { return { enabled: false, reason: 'invalid_config' }; }
 }
 function cleanLabel(value) {
@@ -85,19 +87,36 @@ function sessionPresentation(session, provider = 'codex') {
   const shortId = (session.sessionKey || createHash('sha256').update(session.threadId).digest('hex')).slice(0, 8);
   const project = typeof session.cwd === 'string' ? path.basename(session.cwd.replace(/\/+$/, '')) : '';
   const name = cleanLabel(session.name) || cleanLabel(project) || '未命名会话';
+  if (provider === 'claude') {
+    const atHome = typeof session.cwd === 'string' && path.resolve(session.cwd) === os.homedir();
+    const projectLabel = atHome ? '' : cleanLabel(project);
+    const sessionName = atHome && name === cleanLabel(project) ? '' : name;
+    const context = [...new Set([sessionName, projectLabel].filter(value => value && value !== '未命名会话'))].join(' · ');
+    const body = `${context || '未命名会话'} · ${shortId}`, group = `Claude · ${shortId}`;
+    const taskLabel = cleanLabel(session.taskLabel);
+    if (taskLabel) return { body: `${taskLabel}${context && context !== taskLabel ? `\n${context}` : ''} · ${shortId}`,
+      group, usesClaudeTaskLabel: true, fallbackBody: body };
+    return { body, group };
+  }
   return { body: `${name} · ${shortId}`, group: `${provider === 'claude' ? 'Claude' : 'Codex'} · ${shortId}` };
 }
 function notificationPresentation(config, kind, { provider = 'codex', session } = {}) {
   const bodies = provider === 'claude' ? CLAUDE_BODIES : provider === 'codex' ? BODIES : {};
   const titles = provider === 'claude' ? CLAUDE_TITLES : TITLES;
   if (!Object.hasOwn(bodies, kind)) throw new Error('通知类型无效。');
-  const label = config.includeSessionLabel ? sessionPresentation(session, provider) : null;
+  const safeSession = provider === 'claude' && session && !config.includeClaudeTaskLabel ? { ...session, taskLabel: undefined } : session;
+  const label = config.includeSessionLabel ? sessionPresentation(safeSession, provider) : null;
   return { title: kind === 'test' || label || provider === 'claude' ? titles[kind] : 'CodexLink',
-    body: label?.body || bodies[kind], group: label?.group || (provider === 'claude' ? 'Claude' : 'Codex Remote') };
+    body: label?.body || bodies[kind], group: label?.group || (provider === 'claude' ? 'Claude' : 'Codex Remote'),
+    ...(label?.usesClaudeTaskLabel ? { usesClaudeTaskLabel: true, fallbackBody: label.fallbackBody } : {}) };
 }
 async function sendBark(config, kind, { fetchImpl = fetch, session, provider = 'codex', presentation } = {}) {
   if (!config.enabled) throw new Error('Bark 未配置。');
-  const display = presentation || notificationPresentation(config, kind, { provider, session });
+  let display = presentation || notificationPresentation(config, kind, { provider, session });
+  if (provider === 'claude' && display.usesClaudeTaskLabel && !config.includeClaudeTaskLabel) {
+    display = config.includeSessionLabel ? { ...display, body: display.fallbackBody || CLAUDE_BODIES[kind] }
+      : notificationPresentation(config, kind, { provider });
+  }
   // Select by the queued event's provider, not the process draining the shared
   // outbox or a stored presentation. This also applies updated icons to old rows.
   const icon = normalizeIconURL(config.icons?.[provider]);
@@ -118,8 +137,10 @@ async function sendBark(config, kind, { fetchImpl = fetch, session, provider = '
 function eventNotice(raw) {
   return codexNotice(raw);
 }
-function createBarkNotifications({ stateDir = resolveCodexRemoteStateDir(), config = loadBarkConfig({ stateDir }), fetchImpl = fetch, readThread = async () => null, metadataTimeoutMs = 1500,
+function createBarkNotifications({ stateDir = resolveCodexRemoteStateDir(), config, fetchImpl = fetch, readThread = async () => null, metadataTimeoutMs = 1500,
   report = status => console.log(`[codex-remote] bark: ${JSON.stringify(status)}`), now = () => Date.now() } = {}) {
+  const liveLabelSettings = config === undefined;
+  if (liveLabelSettings) config = loadBarkConfig({ stateDir });
   let store, timer, draining, enabled = config.enabled, reason = config.reason;
   if (enabled) {
     try { store = new NotificationStore(stateDir, { now }); store.prune(); }
@@ -169,9 +190,17 @@ function createBarkNotifications({ stateDir = resolveCodexRemoteStateDir(), conf
     draining = (async () => {
       let row;
       while (enabled && (row = store.claim())) {
+        // The long-running Bridge can claim Claude notices too. Read current
+        // label preferences so a toggle has the same effect as in a fresh hook.
+        let dispatchConfig = config;
+        if (row.provider === 'claude' && liveLabelSettings) {
+          const current = loadBarkConfig({ stateDir });
+          dispatchConfig = { ...config, includeSessionLabel: current.includeSessionLabel === true,
+            includeClaudeTaskLabel: current.includeClaudeTaskLabel === true };
+        }
         // An opt-out made while a notice was queued also applies at dispatch.
-        const presentation = config.includeSessionLabel ? JSON.parse(row.payload) : notificationPresentation(config, row.kind, { provider: row.provider });
-        const result = await sendBark(config, row.kind, { fetchImpl, provider: row.provider, presentation });
+        const presentation = dispatchConfig.includeSessionLabel ? JSON.parse(row.payload) : notificationPresentation(dispatchConfig, row.kind, { provider: row.provider });
+        const result = await sendBark(dispatchConfig, row.kind, { fetchImpl, provider: row.provider, presentation });
         store.finish(row, result.status);
         report({ provider: row.provider, kind: row.kind, ...result });
       }

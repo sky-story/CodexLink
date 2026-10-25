@@ -55,7 +55,7 @@ final class CodexServiceThreadListTests: XCTestCase {
         )
     }
 
-    func testSortThreadsUsesUpdatedAtBeforeCreatedAtFallback() {
+    func testSortThreadsComparesUpdatedAtOrCreatedAtChronologically() {
         let service = makeService()
         let laterByUpdatedAt = CodexThread(
             id: "later-by-updated-at",
@@ -77,8 +77,22 @@ final class CodexServiceThreadListTests: XCTestCase {
 
         XCTAssertEqual(
             sorted.map(\.id),
-            ["later-by-updated-at", "later-by-created-at", "oldest-thread"]
+            ["later-by-created-at", "later-by-updated-at", "oldest-thread"]
         )
+    }
+
+    func testFreshActiveListRestoresMissingPlaceholderButPreservesUserArchive() {
+        let service = makeService()
+        service.threads = [CodexThread(id: "missing"), CodexThread(id: "archived")]
+        service.handleMissingThread("missing")
+        service.archiveThread("archived")
+
+        service.reconcileLocalThreadsWithServer([
+            CodexThread(id: "missing"), CodexThread(id: "archived")
+        ])
+
+        XCTAssertEqual(service.thread(for: "missing")?.syncState, .live)
+        XCTAssertEqual(service.thread(for: "archived")?.syncState, .archivedLocal)
     }
 
     private func makeService() -> CodexService {

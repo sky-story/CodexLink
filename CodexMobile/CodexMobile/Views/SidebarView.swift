@@ -15,6 +15,7 @@ struct SidebarView: View {
     @Binding var isSearchActive: Bool
     var showsInlineCloseButton: Bool = false
     var isVisible: Bool = true
+    var selectedClaudeSessionID: AgentSessionSummary.ID? = nil
 
     let onClose: () -> Void
     let onOpenThread: (CodexThread) -> Void
@@ -93,7 +94,7 @@ struct SidebarView: View {
                 isCreatingThread: isCreatingThread,
                 threads: codex.threads,
                 groups: groupedThreads,
-                selectedThread: selectedThread,
+                selectedThread: selectedClaudeSessionID == nil ? selectedThread : nil,
                 bottomContentInset: 0,
                 timingLabelProvider: { SidebarRelativeTimeFormatter.compactLabel(for: $0) },
                 diffTotalsByThreadID: diffTotalsByThreadID,
@@ -133,6 +134,7 @@ struct SidebarView: View {
                 showsClaudeSection: selectedProvider != .codex && (codex.supportsClaudeChannels || !codex.cachedClaudeSessions.isEmpty || selectedProvider == .claude),
                 claudeSessions: filteredClaudeSessions,
                 claudeError: codex.cachedClaudeSessionsError,
+                selectedClaudeSessionID: selectedClaudeSessionID,
                 onSelectClaudeSession: { session in
                     searchText = ""
                     onOpenClaudeSession?(session)

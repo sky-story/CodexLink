@@ -56,19 +56,20 @@ extension CodexService {
     }
 
     // Sends an RPC request and waits for the matching response by request id.
-    func sendRequest(method: String, params: JSONValue?) async throws -> RPCMessage {
+    func sendRequest(method: String, params: JSONValue?, timeout: Duration? = nil, timeoutMessage: String = "读取 Mac 数据超时，请重试。") async throws -> RPCMessage {
         let generation = connectionGeneration
-        let response = try await sendRequestOnCurrentConnection(method: method, params: params, generation: generation)
+        let response = try await sendRequestOnCurrentConnection(method: method, params: params, generation: generation, timeout: timeout, timeoutMessage: timeoutMessage)
         guard generation == connectionGeneration else { throw CodexServiceError.disconnected }
         return response
     }
 
-    private func sendRequestOnCurrentConnection(method: String, params: JSONValue?, generation: UInt64) async throws -> RPCMessage {
-        if let requestTransportOverride {
+    private func sendRequestOnCurrentConnection(method: String, params: JSONValue?, generation: UInt64, timeout: Duration?, timeoutMessage: String) async throws -> RPCMessage {
+        let transportOverride = requestTransportOverride
+        if timeout == nil, let requestTransportOverride {
             return try await requestTransportOverride(method, params)
         }
 
-        guard isConnected, webSocketConnection != nil || webSocketTask != nil else {
+        guard transportOverride != nil || (isConnected && (webSocketConnection != nil || webSocketTask != nil)) else {
             throw CodexServiceError.disconnected
         }
 
@@ -90,25 +91,61 @@ extension CodexService {
         }
 
         ConnectionTrace.shared.requestSent(key: requestKey, method: method)
-        return try await withCheckedThrowingContinuation { continuation in
-            pendingRequests[requestKey] = continuation
-
-            Task {
-                guard generation == connectionGeneration else { return }
-                do {
-                    try await sendMessage(request)
-                } catch {
-                    guard generation == connectionGeneration else { return }
-                    if shouldTreatSendFailureAsDisconnect(error) {
-                        handleReceiveError(error)
+        var deadlineTask: Task<Void, Never>?
+        var dispatchTask: Task<Void, Never>?
+        defer {
+            deadlineTask?.cancel()
+            if timeout != nil {
+                dispatchTask?.cancel()
+                _ = ConnectionTrace.shared.requestCompleted(key: requestKey)
+            }
+        }
+        // A deadline ends only the phone's wait. It cannot undo a Mac command;
+        // command callers retain durable IDs and recover receipts without replay.
+        return try await withTaskCancellationHandler {
+            if timeout != nil { try Task.checkCancellation() }
+            return try await withCheckedThrowingContinuation { continuation in
+                pendingRequests[requestKey] = continuation
+                if let timeout {
+                    deadlineTask = Task { @MainActor [weak self] in
+                        do { try await Task.sleep(for: timeout) } catch { return }
+                        guard let pending = self?.pendingRequests.removeValue(forKey: requestKey) else { return }
+                        ConnectionTrace.shared.event("rpc_timeout", ["method": method])
+                        pending.resume(throwing: CodexServiceError.invalidInput(timeoutMessage))
+                    }
+                }
+                dispatchTask = Task {
+                    guard pendingRequests[requestKey] != nil else { return }
+                    if let transportOverride {
+                        // Exercise the same deadline/continuation lifecycle with
+                        // simulated transport, including late replies after timeout.
+                        do {
+                            let response = try await transportOverride(method, params)
+                            pendingRequests.removeValue(forKey: requestKey)?.resume(returning: response)
+                        } catch {
+                            pendingRequests.removeValue(forKey: requestKey)?.resume(throwing: error)
+                        }
                         return
                     }
-
-                    // Avoid double-resume if the request was already completed
-                    // (for example by a disconnect race that fails all pending requests).
-                    if let pendingContinuation = pendingRequests.removeValue(forKey: requestKey) {
-                        pendingContinuation.resume(throwing: error)
+                    guard generation == connectionGeneration else { return }
+                    do {
+                        try await sendMessage(request)
+                    } catch {
+                        if timeout != nil, pendingRequests[requestKey] == nil { return }
+                        guard generation == connectionGeneration else { return }
+                        if shouldTreatSendFailureAsDisconnect(error) {
+                            handleReceiveError(error)
+                            return
+                        }
+                        pendingRequests.removeValue(forKey: requestKey)?.resume(throwing: error)
                     }
+                }
+            }
+        } onCancel: {
+            guard timeout != nil else { return }
+            Task { @MainActor [weak self] in
+                if let pending = self?.pendingRequests.removeValue(forKey: requestKey) {
+                    pending.resume(throwing: CancellationError())
                 }
             }
         }

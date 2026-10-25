@@ -136,6 +136,10 @@ private extension CodexService {
 
         if let nestedBuckets = payloadObject["rateLimits"]?.objectValue
             ?? payloadObject["rate_limits"]?.objectValue {
+            if firstStringValue(in: nestedBuckets, keys: ["limitId", "limit_id", "id"]) != nil,
+               let bucket = decodeRateLimitBucket(limitId: nil, value: .object(nestedBuckets)) {
+                return [bucket]
+            }
             if containsDirectRateLimitWindows(nestedBuckets) {
                 return decodeDirectRateLimitBuckets(from: nestedBuckets)
             }
@@ -258,8 +262,8 @@ private extension CodexService {
                 mergedById[bucket.limitId] = CodexRateLimitBucket(
                     limitId: bucket.limitId,
                     limitName: bucket.limitName ?? current.limitName,
-                    primary: bucket.primary ?? current.primary,
-                    secondary: bucket.secondary ?? current.secondary
+                    primary: mergeRateLimitWindow(existing: current.primary, incoming: bucket.primary),
+                    secondary: mergeRateLimitWindow(existing: current.secondary, incoming: bucket.secondary)
                 )
             } else {
                 mergedById[bucket.limitId] = bucket
@@ -267,6 +271,15 @@ private extension CodexService {
         }
 
         return Array(mergedById.values)
+    }
+
+    private func mergeRateLimitWindow(existing: CodexRateLimitWindow?, incoming: CodexRateLimitWindow?) -> CodexRateLimitWindow? {
+        guard let incoming else { return existing }
+        return CodexRateLimitWindow(
+            usedPercent: incoming.usedPercent,
+            windowDurationMins: incoming.windowDurationMins ?? existing?.windowDurationMins,
+            resetsAt: incoming.resetsAt ?? existing?.resetsAt
+        )
     }
 
     func shouldRetryRateLimitsWithEmptyParams(_ error: Error) -> Bool {

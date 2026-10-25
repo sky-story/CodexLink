@@ -17,7 +17,7 @@ struct CodexMobileApp: App {
         let service = CodexService()
 #if DEBUG && targetEnvironment(simulator)
         if let scene = ProcessInfo.processInfo.environment["CODEX_REMOTE_DOCS_SCENE"] {
-            if scene == "sidebar-performance" { configureSidebarPerformancePreview(service) }
+            if scene == "sidebar-performance" || scene == "sidebar-audit" { configureSidebarPerformancePreview(service) }
             else if scene == "agent-overview" { configureSessionOverviewPreview(service) }
             else if scene.hasPrefix("claude-") { configureClaudeDocumentationPreview(service, scene: scene) }
             else { configureDocumentationPreview(service, scene: scene) }
@@ -59,10 +59,18 @@ struct CodexMobileApp: App {
                     SessionOverviewPreview()
                 } else if scene == "claude-list" {
                     NavigationStack { ClaudeSessionsView() }
+                } else if scene == "claude-live-append" {
+                    ClaudeLiveAppendPreview()
                 } else if scene == "claude-reconnect" {
                     ClaudeReconnectPreview()
+                } else if scene == "claude-stalled-reconnect" {
+                    ClaudeReconnectPreview(replacesConnectionOnly: true)
+                } else if scene == "claude-list-stalled-reconnect" {
+                    ClaudeReconnectPreview(replacesConnectionOnly: true, showsSessionList: true)
                 } else if scene.hasPrefix("claude-") {
                     NavigationStack { ClaudeConversationView(server: codexService.sessionOverviewServerKey, sessionID: "claude-demo", initialName: "示例：待办 App") }
+                } else if scene == "sidebar-audit" {
+                    SidebarAuditPreview()
                 } else if scene == "sessions" || scene == "sidebar-performance" {
                     ContentView()
                 } else {

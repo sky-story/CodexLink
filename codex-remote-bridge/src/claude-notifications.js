@@ -1,10 +1,12 @@
 // Translate official Claude hooks into notification events. No transcript parsing,
-// model calls, permission decisions, command execution, or prompt text in storage.
+// model calls, permission decisions, or command execution. Task-label sharing is
+// separately opt-in and stores only a bounded instruction excerpt.
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { NotificationStore } = require('./notification-store');
 const { hash, canonical } = require('./notification-events');
 const { loadBarkConfig, notificationPresentation, cleanLabel } = require('./bark-push');
+const { taskLabelFromPrompt } = require('./claude-notification-labels');
 
 const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'Stop', 'StopFailure', 'PermissionRequest', 'PreToolUse'];
 
@@ -29,6 +31,15 @@ function recordClaudeHook(input, { stateDir, config = loadBarkConfig({ stateDir 
       const label = config.includeSessionLabel ? cleanLabel(input.session_title) || previous?.label || cleanLabel(project) || null : null;
       store.db.prepare('INSERT INTO claude_sessions VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET run=excluded.run,label=excluded.label,updated_at=excluded.updated_at')
         .run(sessionKey, runKey, label, now());
+      let taskLabel;
+      if (config.includeSessionLabel && config.includeClaudeTaskLabel) {
+        const next = event === 'UserPromptSubmit' ? taskLabelFromPrompt(input.prompt) : null;
+        taskLabel = next || store.db.prepare('SELECT label FROM claude_task_labels WHERE id=?').get(sessionKey)?.label;
+        if (taskLabel) store.db.prepare('INSERT INTO claude_task_labels VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET label=excluded.label,updated_at=excluded.updated_at')
+          .run(sessionKey, taskLabel, now());
+      } else {
+        store.db.prepare('DELETE FROM claude_task_labels WHERE id=?').run(sessionKey);
+      }
       let kind, detail;
       if (event === 'Stop') {
         // Stop is a response boundary, not proof that the user's entire goal or
@@ -49,7 +60,7 @@ function recordClaudeHook(input, { stateDir, config = loadBarkConfig({ stateDir 
         detail = hash([input.tool_name, canonical(input.tool_input || {})]);
       } else return { status: 'tracked' };
       const id = hash(['claude', sessionKey, runKey, kind, detail]);
-      const presentation = notificationPresentation(config, kind, { provider: 'claude', session: { sessionKey, name: label } });
+      const presentation = notificationPresentation(config, kind, { provider: 'claude', session: { sessionKey, name: label, cwd: input.cwd, taskLabel } });
       const fresh = store.enqueue({ provider: 'claude', id, kind, presentation });
       return { status: fresh ? 'queued' : 'duplicate', kind };
     });

@@ -31,7 +31,7 @@ node scripts/bark-notifications.cjs --session-labels on
 node scripts/private-service.cjs restart
 ```
 
-会话名称仍为可选功能。开启后只发送正式会话名称或项目目录名，以及散列得到的短标识；不发送提示词、回答内容、命令、完整路径或原始会话 ID。关闭后使用通用文案。Claude 直接读取当前设置，Bridge 在重启后读取设置。
+会话名称仍为可选功能。在此模式下，只发送正式会话名称、项目目录名和散列得到的短标识；不读取提示词或回答作通知正文。名称与项目相同时只显示一次，在用户主目录启动时不把用户名作为项目上下文。关闭后使用通用文案。Claude 直接读取当前标签设置，Codex Bridge 的设置在重启后加载。
 
 需要区分图标时，用 `node scripts/bark-notifications.cjs --icon claude default` 选择官方 Claude Logo，Codex 则用 `--icon codex default` 选择 CodexLink 图标。首次升级需重新安装 Hooks 并新开 Claude 会话，旧窗口可能仍使用不支持图标的发送器。配置、网络要求和两种来源的预览命令见 [Bark 图标设置](setup.md#分别显示-codexlink-和-claude-图标)。
 
@@ -43,6 +43,35 @@ node scripts/claude-notifications.cjs uninstall
 
 只移除本项目添加的 Hooks，不覆盖你之后添加的其他设置，不删除 Bark 配置和历史发送记录。再次新开 Claude 会话生效。
 
+## 用任务短标题区分多个窗口
+
+多个窗口都叫同一个用户名或项目名时，可以单独开启 Claude 任务短标题。**默认关闭**，并且要求已开启会话名称：
+
+```sh
+node scripts/bark-notifications.cjs --claude-task-labels on
+node scripts/bark-notifications.cjs --status
+```
+
+开启后，通知正文首先显示本轮指令的一段短文本，下一行显示不同的会话名称、项目名和短标识。例如以下虚构通知：
+
+```text
+Claude · 本轮已回复
+修复购物车结算按钮
+storefront · 59153d58
+```
+
+短标题不是模型生成的语义摘要：只从 `UserPromptSubmit` 的指令前 8192 个字符中提取首个非空文本行，最多保留 32 个 Unicode 码点，超出加省略号。不调用模型、不读取会话历史。代码块、已知后台消息和粘贴包装会被跳过；链接、常见凭据格式和绝对路径会作简化处理。这些规则不能识别所有敏感内容，**保留下来的指令片段会发送给 Bark，并可能出现在锁屏上**。只希望分享手动名称时保持此选项关闭，并在 Claude 中给窗口起有意义的会话名称。
+
+“继续”“好的”等简短回复、已识别的后台消息会沿用该窗口上一条有效标题；不同窗口独立保存。已排队的通知保留排队时的标题，不会被下一轮任务覆盖。开启后从下一次有效 `UserPromptSubmit` 开始捕获；正在执行但尚无标题的轮次继续使用会话名称模式，不会回读旧对话补齐。
+
+本地仅保存短标题和散列会话标识；最后活动超过 7 天后随后续事件清理。关闭命令会删除保存的短标题，并从尚未被发送器领取的通知中移除指令片段；已发送或正在发送的通知无法撤回：
+
+```sh
+node scripts/bark-notifications.cjs --claude-task-labels off
+```
+
+已安装支持此功能的 Hook 和 Bridge 后，切换任务短标题无需重启会话或服务。首次升级仍按上面的安装说明更新运行代码。此选项不改变 Codex 通知。
+
 ## 提醒含义
 
 | 事件 | 提醒 | 含义 |
@@ -53,7 +82,7 @@ node scripts/claude-notifications.cjs uninstall
 | `AskUserQuestion` 的 `PreToolUse` | Claude · 需要补充信息 | 请到 Mac 回答问题 |
 | Codex `turn/completed` | 保持原有 Codex 文案 | 完成、失败和中断分别处理 |
 
-`SessionStart` 和 `UserPromptSubmit` 只维护本地会话/轮次身份，不发通知。子代理完成、普通工具执行完成、会话退出不会被当成主任务完成。Claude 的 `Stop` 不覆盖用户手动中断；其他 Stop Hooks 也可能让 Claude 继续执行，因此使用“本轮已回复”。旧版本若不提供后台任务字段，也不会据此声称没有后台任务。
+`SessionStart` 和 `UserPromptSubmit` 只维护本地会话/轮次身份及已开启的标签，不发通知。子代理完成、普通工具执行完成、会话退出不会被当成主任务完成。Claude 的 `Stop` 不覆盖用户手动中断；其他 Stop Hooks 也可能让 Claude 继续执行，因此使用“本轮已回复”。旧版本若不提供后台任务字段，也不会据此声称没有后台任务。
 
 后台任务、常驻 Monitor、`/loop`、`CronCreate` 或其他计划唤醒可以跨越多轮回复，不能用它们是否存在来判断主会话有没有回复完。主会话 `Stop` 正常发送“本轮已回复”，同一会话同一轮的重复 `Stop` 只提醒一次；后台活动后来结束也不会补发同一轮提醒。仍不单独发送“后台仍有任务”进度提醒，子代理完成也不触发主会话回复通知。审批、补充信息和 API 错误仍会单独提醒。
 

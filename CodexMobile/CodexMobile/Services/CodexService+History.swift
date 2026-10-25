@@ -959,8 +959,15 @@ extension CodexService {
             && serverItemId != nil
             && localItemId != serverItemId
             && !hasStableAssistantIdentity(localItemId)
+        // The merge already matched this closed reply to its canonical history row.
+        // Update protocol identity while keeping the local row id stable for SwiftUI.
+        let shouldRebindClosedAssistantItem = !preservesRunningPresentation
+            && value.role == .assistant
+            && !localMessage.isStreaming
+            && serverItemId != nil
         if shouldAttachMissingItemId
             || shouldRebindRunningAssistantItem
+            || shouldRebindClosedAssistantItem
             || (
                 value.role == .system
                     && value.kind == .toolActivity

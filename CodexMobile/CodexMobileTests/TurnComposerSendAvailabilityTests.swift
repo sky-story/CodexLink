@@ -289,6 +289,11 @@ final class TurnComposerSendAvailabilityTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
         let service = CodexService(defaults: defaults)
         service.messagesByThread = [:]
+        service.isInitialized = true
+        let threadIDs = ["thread-send-failure", "thread-subagents", "thread-literal-subagents",
+                         "thread-shifted-subagents", "thread-trimmed-subagents", "thread-file-mention-subagents"]
+        service.resumedThreadIDs = Set(threadIDs)
+        service.threads = threadIDs.map { CodexThread(id: $0, title: "Composer fixture") }
 
         // CodexService currently crashes while deallocating in unit-test environment.
         // Keep instances alive for process lifetime so assertions remain deterministic.

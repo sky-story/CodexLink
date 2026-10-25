@@ -94,7 +94,7 @@ extension CodexService {
         guard generation == connectionGeneration else { throw CodexServiceError.disconnected }
         reconcileLocalThreadsWithServer(activeThreads, serverArchivedThreads: archivedThreads)
 
-        if activeThreadId == nil {
+        if activeThreadId == nil, pendingNotificationOpenThreadID == nil {
             activeThreadId = firstLiveThreadID()
         }
     }
@@ -1405,6 +1405,7 @@ extension CodexService {
     }
 
     func userFacingTurnErrorMessage(from error: Error) -> String {
+        if shouldSuppressRecoverableConnectionError(error) { return "" }
         if shouldTreatSendFailureAsDisconnect(error)
             || isRetryableSavedSessionConnectError(error)
             || isRecoverableTransientConnectionError(error)
