@@ -151,6 +151,11 @@ struct ClaudeConversationView: View {
                     Task { @MainActor in
                         await Task.yield()
                         scroll.scrollTo("claude-history-end", anchor: .bottom)
+                        // iOS 18 can leave the offset past the real end once the rows
+                        // near the bottom replace their estimates, showing a blank page
+                        // until the user drags. Re-anchor after those rows have laid out.
+                        try? await Task.sleep(for: .milliseconds(250))
+                        scroll.scrollTo("claude-history-end", anchor: .bottom)
                     }
                 }
             }

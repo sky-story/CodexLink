@@ -397,6 +397,27 @@ test("sanitizeThreadHistoryImagesForRelay trims oversized history down to the ne
   );
 });
 
+test("sanitizeThreadHistoryImagesForRelay keeps the longest newest-turn suffix that fits", () => {
+  // 120 turns of ~100 KB: only the newest 30 fit under the 3 MiB relay limit.
+  const turns = Array.from({ length: 120 }, (_, index) => ({
+    id: `turn-${index}`,
+    items: [{ id: `item-${index}`, type: "assistant_message", text: "C".repeat(100 * 1024) }],
+  }));
+  const rawMessage = JSON.stringify({
+    id: "req-thread-many-turns",
+    result: { thread: { id: "thread-many-turns", turns } },
+  });
+
+  const encoded = sanitizeThreadHistoryImagesForRelay(rawMessage, "thread/read");
+  const sanitized = JSON.parse(encoded);
+  const keptIDs = sanitized.result.thread.turns.map((turn) => turn.id);
+
+  assert.equal(sanitized.result.thread.historyTailTruncatedForRelay, true);
+  assert.ok(Buffer.byteLength(encoded, "utf8") <= 3 * 1024 * 1024);
+  assert.equal(keptIDs.at(-1), "turn-119");
+  assert.equal(keptIDs.length, 30);
+});
+
 test("sanitizeThreadHistoryImagesForRelay truncates the newest oversized text item to its tail", () => {
   const largeText = `header\n${"B".repeat(4 * 1024 * 1024)}`;
   const rawMessage = JSON.stringify({

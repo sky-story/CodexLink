@@ -18,6 +18,10 @@ function socketURL(endpoint) {
   if (url.protocol !== 'wss:' && !(url.protocol === 'ws:' && ['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname))) throw new Error('Codex endpoint must use a local Unix socket, loopback, or WSS');
   return endpoint;
 }
+// Full-history reads of long local threads exceed 32 MiB (measured 32.3 MiB). An
+// oversized frame closes the whole daemon socket, so the phone loops forever between
+// "loading" and "waiting for Codex". The socket is local; relay payloads are trimmed later.
+const DAEMON_MAX_PAYLOAD_BYTES = 512 * 1024 * 1024;
 const READ_METHODS = new Set(['model/list', 'thread/list', 'thread/loaded/list', 'thread/read', 'thread/turns/list', 'thread/items/list', 'thread/queue/list', 'thread/name/set', 'thread/unsubscribe', 'account/read', 'account/rateLimits/read', 'skills/list', 'collaborationMode/list', 'mcpServerStatus/list', 'plugin/list']);
 
 async function readThreadWithLiveFallback(rpc, params) {
@@ -92,7 +96,7 @@ function createSharedRuntime({ endpoint = defaultEndpoint(), env = process.env, 
   }
   function connect() {
     if (stopped) return;
-    socket = new WebSocket(socketURL(endpoint), { maxPayload: 32 * 1024 * 1024,
+    socket = new WebSocket(socketURL(endpoint), { maxPayload: DAEMON_MAX_PAYLOAD_BYTES,
       ...(env.CODEX_REMOTE_UPSTREAM_TOKEN ? { headers: { Authorization: `Bearer ${env.CODEX_REMOTE_UPSTREAM_TOKEN}` } } : {}) });
     socket.on('open', async () => {
       try {

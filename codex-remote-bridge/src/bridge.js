@@ -1577,19 +1577,18 @@ function trimThreadPayloadForRelay(parsed, explicitThread = undefined) {
   }
 
   const turns = thread.turns;
-  let trimmedTurns = turns.slice();
-  while (trimmedTurns.length > 1) {
-    trimmedTurns = trimmedTurns.slice(1);
-    const candidateThread = {
-      ...thread,
-      turns: trimmedTurns,
-      historyTailTruncatedForRelay: true,
-    };
-    encoded = encodeRelayThreadPayload(parsed, candidateThread);
-    if (encoded != null && Buffer.byteLength(encoded, "utf8") <= RELAY_THREAD_PAYLOAD_SOFT_LIMIT_BYTES) {
-      return encoded;
-    }
-    workingThread = candidateThread;
+  const turnsCandidate = (suffix) => ({
+    ...thread,
+    turns: suffix,
+    historyTailTruncatedForRelay: true,
+  });
+  encoded = encodeLongestFittingSuffix(turns, (suffix) => encodeRelayThreadPayload(parsed, turnsCandidate(suffix)));
+  if (encoded != null) {
+    return encoded;
+  }
+  const trimmedTurns = turns.slice(-1);
+  if (turns.length > 1) {
+    workingThread = turnsCandidate(trimmedTurns);
   }
 
   const newestTurn = trimmedTurns[0];
@@ -1597,22 +1596,22 @@ function trimThreadPayloadForRelay(parsed, explicitThread = undefined) {
     return encodeRelayThreadPayload(parsed, workingThread);
   }
 
-  let trimmedItems = newestTurn.items.slice();
-  while (trimmedItems.length > 1) {
-    trimmedItems = trimmedItems.slice(1);
-    const candidateThread = {
-      ...thread,
-      turns: [{
-        ...newestTurn,
-        items: trimmedItems,
-      }],
-      historyTailTruncatedForRelay: true,
-    };
-    encoded = encodeRelayThreadPayload(parsed, candidateThread);
-    if (encoded != null && Buffer.byteLength(encoded, "utf8") <= RELAY_THREAD_PAYLOAD_SOFT_LIMIT_BYTES) {
-      return encoded;
-    }
-    workingThread = candidateThread;
+  const items = newestTurn.items;
+  const itemsCandidate = (suffix) => ({
+    ...thread,
+    turns: [{
+      ...newestTurn,
+      items: suffix,
+    }],
+    historyTailTruncatedForRelay: true,
+  });
+  encoded = encodeLongestFittingSuffix(items, (suffix) => encodeRelayThreadPayload(parsed, itemsCandidate(suffix)));
+  if (encoded != null) {
+    return encoded;
+  }
+  const trimmedItems = items.slice(-1);
+  if (items.length > 1) {
+    workingThread = itemsCandidate(trimmedItems);
   }
 
   const mostRecentItem = trimmedItems[0];
@@ -1646,6 +1645,25 @@ function trimThreadPayloadForRelay(parsed, explicitThread = undefined) {
     historyTailTruncatedForRelay: true,
   };
   return encodeRelayThreadPayload(parsed, candidateThread);
+}
+
+// Payloads only shrink as older entries are dropped, so a binary search finds the
+// longest fitting suffix without re-encoding a multi-MB history once per entry.
+function encodeLongestFittingSuffix(entries, encodeSuffix) {
+  let low = 1;
+  let high = entries.length - 1;
+  let fitting = null;
+  while (low <= high) {
+    const dropCount = Math.floor((low + high) / 2);
+    const encoded = encodeSuffix(entries.slice(dropCount));
+    if (encoded != null && Buffer.byteLength(encoded, "utf8") <= RELAY_THREAD_PAYLOAD_SOFT_LIMIT_BYTES) {
+      fitting = encoded;
+      high = dropCount - 1;
+    } else {
+      low = dropCount + 1;
+    }
+  }
+  return fitting;
 }
 
 function encodeRelayThreadPayload(parsed, thread) {
